@@ -2,6 +2,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -9,7 +10,7 @@ from app.dependencies.auth import get_current_user
 from app.models.pat import PersonalAccessToken
 from app.models.user import User
 from app.schemas.common import APIResponse
-from app.schemas.pat import PATCreateRequest, PATCreateResponse
+from app.schemas.pat import PATCreateRequest, PATCreateResponse, PATListItemResponse
 from app.services.pat import generate_pat, validate_scopes
 
 router = APIRouter(prefix="/tokens", tags=["tokens"])
@@ -66,3 +67,36 @@ def create_token(
             expires_at=pat.expires_at,
         ),
     )
+
+
+@router.get(
+    "",
+    response_model=APIResponse[list[PATListItemResponse]],
+    status_code=status.HTTP_200_OK,
+)
+def list_tokens(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List all PATs belonging to the authenticated user."""
+    stmt = select(PersonalAccessToken).where(
+        PersonalAccessToken.user_id == current_user.id
+    ).order_by(PersonalAccessToken.created_at.desc())
+
+    tokens = db.execute(stmt).scalars().all()
+
+    token_list = [
+        PATListItemResponse(
+            id=token.id,
+            name=token.name,
+            token_prefix=token.token_prefix,
+            scopes=json.loads(token.scopes),
+            created_at=token.created_at,
+            expires_at=token.expires_at,
+            last_used_at=token.last_used_at,
+            is_revoked=token.is_revoked,
+        )
+        for token in tokens
+    ]
+
+    return APIResponse(success=True, data=token_list)

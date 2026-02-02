@@ -16,3 +16,15 @@ class PATCreateResponse(BaseModel):
     scopes: list[str]
     created_at: datetime
     expires_at: datetime
+
+
+class PATListItemResponse(BaseModel):
+    """Response schema for a single PAT in a list."""
+    id: int
+    name: str
+    token_prefix: str
+    scopes: list[str]
+    created_at: datetime
+    expires_at: datetime
+    last_used_at: datetime | None
+    is_revoked: bool
