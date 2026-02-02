@@ -12,15 +12,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create .env file
-        run: cp .env.sample .env
-
       - name: Build and start containers
         run: docker compose up -d --build
+        env:
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
 
       - name: Wait for services
         run: |
           timeout 30 bash -c 'until docker compose exec -T db pg_isready; do sleep 1; done'
+        env:
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
 
       - name: Run tests
         run: docker compose exec -T app uv run pytest -v
