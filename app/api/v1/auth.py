@@ -5,9 +5,10 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.user import User
-from app.schemas.auth import UserRegisterRequest, UserResponse
+from app.schemas.auth import TokenResponse, UserLoginRequest, UserRegisterRequest, UserResponse
 from app.schemas.common import APIResponse
-from app.services.auth import hash_password
+from app.services.auth import hash_password, verify_password
+from app.services.jwt import create_access_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -45,3 +46,36 @@ def register(request: UserRegisterRequest, db: Session = Depends(get_db)):
         )
 
     return APIResponse(success=True, data=UserResponse.model_validate(user))
+
+
+@router.post("/login", response_model=APIResponse[TokenResponse])
+def login(request: UserLoginRequest, db: Session = Depends(get_db)):
+    # Find user
+    stmt = select(User).where(User.username == request.username)
+    user = db.execute(stmt).scalar_one_or_none()
+
+    # Verify password
+    if not user or not verify_password(request.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "success": False,
+                "error": "Unauthorized",
+                "message": "Invalid credentials",
+            },
+        )
+
+    # Check if user is active
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "success": False,
+                "error": "Forbidden",
+                "message": "User is inactive",
+            },
+        )
+
+    # Create JWT
+    access_token = create_access_token(user.id)
+    return APIResponse(success=True, data=TokenResponse(access_token=access_token))
