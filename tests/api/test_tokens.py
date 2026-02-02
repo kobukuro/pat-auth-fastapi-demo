@@ -148,3 +148,193 @@ def test_scope_hierarchy_no_cross_resource(db):
     # Multiple scopes from different resources
     assert has_permission(db, ["workspaces:admin", "fcs:read"], "fcs:read") is True
     assert has_permission(db, ["workspaces:admin", "fcs:read"], "fcs:write") is False
+
+
+# List Tokens Tests
+
+
+def test_list_tokens_success(client):
+    """Test listing tokens with valid JWT."""
+    jwt = _get_jwt(client)
+
+    # Create multiple tokens
+    for i in range(3):
+        client.post(
+            URLs.TOKENS,
+            headers={"Authorization": f"Bearer {jwt}"},
+            json={
+                "name": f"Token {i}",
+                "scopes": ["fcs:read"],
+                "expires_in_days": 30,
+            },
+        )
+
+    # List tokens
+    response = client.get(
+        URLs.TOKENS,
+        headers={"Authorization": f"Bearer {jwt}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert len(data["data"]) == 3
+
+    # Verify structure of first token
+    token = data["data"][0]
+    assert "id" in token
+    assert "name" in token
+    assert "token_prefix" in token
+    assert token["token_prefix"].startswith("pat_")
+    assert len(token["token_prefix"]) == 8
+    assert "scopes" in token
+    assert "created_at" in token
+    assert "expires_at" in token
+    assert "last_used_at" in token
+    assert "is_revoked" in token
+
+
+def test_list_tokens_empty(client):
+    """Test listing tokens when user has none."""
+    jwt = _get_jwt(client)
+
+    response = client.get(
+        URLs.TOKENS,
+        headers={"Authorization": f"Bearer {jwt}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert len(data["data"]) == 0
+
+
+def test_list_tokens_without_jwt(client):
+    """Test that listing tokens requires authentication."""
+    response = client.get(URLs.TOKENS)
+
+    assert response.status_code == 401
+
+
+def test_list_tokens_invalid_jwt(client):
+    """Test that invalid JWT returns 401."""
+    response = client.get(
+        URLs.TOKENS,
+        headers={"Authorization": "Bearer invalid_token"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_list_tokens_isolation(client):
+    """Test that users can only see their own tokens."""
+    # Create first user and token
+    jwt1 = _get_jwt(client)
+    client.post(
+        URLs.TOKENS,
+        headers={"Authorization": f"Bearer {jwt1}"},
+        json={
+            "name": "User1 Token",
+            "scopes": ["fcs:read"],
+            "expires_in_days": 30,
+        },
+    )
+
+    # Create second user and token
+    client.post(
+        URLs.REGISTER,
+        json={"username": "user2", "password": "password123"},
+    )
+    login_response = client.post(
+        URLs.LOGIN,
+        json={"username": "user2", "password": "password123"},
+    )
+    jwt2 = login_response.json()["data"]["access_token"]
+
+    client.post(
+        URLs.TOKENS,
+        headers={"Authorization": f"Bearer {jwt2}"},
+        json={
+            "name": "User2 Token",
+            "scopes": ["users:read"],
+            "expires_in_days": 30,
+        },
+    )
+
+    # User1 should only see their own token
+    response = client.get(
+        URLs.TOKENS,
+        headers={"Authorization": f"Bearer {jwt1}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["data"]) == 1
+    assert data["data"][0]["name"] == "User1 Token"
+
+
+def test_list_tokens_no_sensitive_data(client):
+    """Test that full token and hash are not exposed."""
+    jwt = _get_jwt(client)
+
+    # Create a token
+    create_response = client.post(
+        URLs.TOKENS,
+        headers={"Authorization": f"Bearer {jwt}"},
+        json={
+            "name": "Test Token",
+            "scopes": ["fcs:read"],
+            "expires_in_days": 30,
+        },
+    )
+    full_token = create_response.json()["data"]["token"]
+
+    # List tokens
+    list_response = client.get(
+        URLs.TOKENS,
+        headers={"Authorization": f"Bearer {jwt}"},
+    )
+
+    token_data = list_response.json()["data"][0]
+
+    # Verify sensitive fields are not present
+    assert "token" not in token_data
+    assert "token_hash" not in token_data
+    assert full_token not in str(token_data)
+
+    # Verify only prefix is shown
+    assert token_data["token_prefix"] == full_token[:8]
+
+
+def test_list_tokens_ordered_by_created_at(client):
+    """Test that tokens are ordered by creation date (newest first)."""
+    import time
+
+    jwt = _get_jwt(client)
+
+    # Create tokens with delay
+    token_ids = []
+    for i in range(3):
+        response = client.post(
+            URLs.TOKENS,
+            headers={"Authorization": f"Bearer {jwt}"},
+            json={
+                "name": f"Token {i}",
+                "scopes": ["fcs:read"],
+                "expires_in_days": 30,
+            },
+        )
+        token_ids.append(response.json()["data"]["id"])
+        time.sleep(0.01)  # Ensure different timestamps
+
+    # List tokens
+    response = client.get(
+        URLs.TOKENS,
+        headers={"Authorization": f"Bearer {jwt}"},
+    )
+
+    tokens = response.json()["data"]
+    # Should be in reverse order (newest first)
+    assert tokens[0]["id"] == token_ids[2]
+    assert tokens[1]["id"] == token_ids[1]
+    assert tokens[2]["id"] == token_ids[0]
