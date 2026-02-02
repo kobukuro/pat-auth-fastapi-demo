@@ -100,3 +100,56 @@ def list_tokens(
     ]
 
     return APIResponse(success=True, data=token_list)
+
+
+@router.get(
+    "/{token_id}",
+    response_model=APIResponse[PATListItemResponse],
+    status_code=status.HTTP_200_OK,
+)
+def get_token(
+    token_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get a single PAT by ID."""
+    # Query token by ID
+    token = db.execute(
+        select(PersonalAccessToken).where(PersonalAccessToken.id == token_id)
+    ).scalar_one_or_none()
+
+    # Check if token exists
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "success": False,
+                "error": "Not Found",
+                "message": "Token not found",
+            },
+        )
+
+    # Check if token belongs to current user
+    if token.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "success": False,
+                "error": "Not Found",
+                "message": "Token not found",
+            },
+        )
+
+    return APIResponse(
+        success=True,
+        data=PATListItemResponse(
+            id=token.id,
+            name=token.name,
+            token_prefix=token.token_prefix,
+            scopes=json.loads(token.scopes),
+            created_at=token.created_at,
+            expires_at=token.expires_at,
+            last_used_at=token.last_used_at,
+            is_revoked=token.is_revoked,
+        ),
+    )

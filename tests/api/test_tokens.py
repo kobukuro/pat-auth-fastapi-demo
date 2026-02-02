@@ -338,3 +338,147 @@ def test_list_tokens_ordered_by_created_at(client):
     assert tokens[0]["id"] == token_ids[2]
     assert tokens[1]["id"] == token_ids[1]
     assert tokens[2]["id"] == token_ids[0]
+
+
+# Get Single Token Tests
+
+
+def test_get_token_success(client):
+    """Test getting a single token successfully."""
+    jwt = _get_jwt(client)
+
+    # Create a token
+    create_response = client.post(
+        URLs.TOKENS,
+        headers={"Authorization": f"Bearer {jwt}"},
+        json={
+            "name": "Test Token",
+            "scopes": ["fcs:read"],
+            "expires_in_days": 30,
+        },
+    )
+    token_id = create_response.json()["data"]["id"]
+
+    # Get the token
+    response = client.get(
+        f"{URLs.TOKENS}/{token_id}",
+        headers={"Authorization": f"Bearer {jwt}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["data"]["id"] == token_id
+    assert data["data"]["name"] == "Test Token"
+    assert "token_prefix" in data["data"]
+    assert data["data"]["token_prefix"].startswith("pat_")
+    assert len(data["data"]["token_prefix"]) == 8
+
+
+def test_get_token_not_found(client):
+    """Test getting a non-existent token returns 404."""
+    jwt = _get_jwt(client)
+
+    response = client.get(
+        f"{URLs.TOKENS}/99999",
+        headers={"Authorization": f"Bearer {jwt}"},
+    )
+
+    assert response.status_code == 404
+    data = response.json()
+    # FastAPI wraps the detail in a "detail" key
+    assert "detail" in data
+    assert data["detail"]["success"] is False
+    assert data["detail"]["error"] == "Not Found"
+
+
+def test_get_token_without_jwt(client):
+    """Test that getting a token requires authentication."""
+    response = client.get(f"{URLs.TOKENS}/1")
+
+    assert response.status_code == 401
+
+
+def test_get_token_invalid_jwt(client):
+    """Test that invalid JWT returns 401."""
+    response = client.get(
+        f"{URLs.TOKENS}/1",
+        headers={"Authorization": "Bearer invalid_token"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_get_token_other_user_token(client):
+    """Test that users cannot access tokens owned by other users."""
+    # Create first user and token
+    jwt1 = _get_jwt(client)
+    create_response = client.post(
+        URLs.TOKENS,
+        headers={"Authorization": f"Bearer {jwt1}"},
+        json={
+            "name": "User1 Token",
+            "scopes": ["fcs:read"],
+            "expires_in_days": 30,
+        },
+    )
+    token_id = create_response.json()["data"]["id"]
+
+    # Create second user
+    client.post(
+        URLs.REGISTER,
+        json={"username": "user2", "password": "password123"},
+    )
+    login_response = client.post(
+        URLs.LOGIN,
+        json={"username": "user2", "password": "password123"},
+    )
+    jwt2 = login_response.json()["data"]["access_token"]
+
+    # User2 tries to access User1's token
+    response = client.get(
+        f"{URLs.TOKENS}/{token_id}",
+        headers={"Authorization": f"Bearer {jwt2}"},
+    )
+
+    # Should return 404 (not 403) for security
+    assert response.status_code == 404
+    data = response.json()
+    # FastAPI wraps the detail in a "detail" key
+    assert "detail" in data
+    assert data["detail"]["success"] is False
+    assert data["detail"]["error"] == "Not Found"
+
+
+def test_get_token_no_sensitive_data(client):
+    """Test that full token and hash are not exposed."""
+    jwt = _get_jwt(client)
+
+    # Create a token
+    create_response = client.post(
+        URLs.TOKENS,
+        headers={"Authorization": f"Bearer {jwt}"},
+        json={
+            "name": "Test Token",
+            "scopes": ["fcs:read"],
+            "expires_in_days": 30,
+        },
+    )
+    full_token = create_response.json()["data"]["token"]
+    token_id = create_response.json()["data"]["id"]
+
+    # Get the token
+    get_response = client.get(
+        f"{URLs.TOKENS}/{token_id}",
+        headers={"Authorization": f"Bearer {jwt}"},
+    )
+
+    token_data = get_response.json()["data"]
+
+    # Verify sensitive fields are not present
+    assert "token" not in token_data
+    assert "token_hash" not in token_data
+    assert full_token not in str(token_data)
+
+    # Verify only prefix is shown
+    assert token_data["token_prefix"] == full_token[:8]
