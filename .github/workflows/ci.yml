@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create .env file
+        run: cp .env.sample .env
+
+      - name: Build and start containers
+        run: docker compose up -d --build
+
+      - name: Wait for services
+        run: |
+          timeout 30 bash -c 'until docker compose exec -T db pg_isready; do sleep 1; done'
+
+      - name: Run tests
+        run: docker compose exec -T app uv run pytest -v
+
+      - name: Stop containers
+        if: always()
+        run: docker compose down -v

@@ -10,3 +10,7 @@ wheels/
 .venv
 
 .idea
+.claude
+
+# Environment variables
+.env
