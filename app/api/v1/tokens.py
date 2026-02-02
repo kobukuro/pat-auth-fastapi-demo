@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -153,3 +153,47 @@ def get_token(
             is_revoked=token.is_revoked,
         ),
     )
+
+
+@router.delete(
+    "/{token_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def revoke_token(
+    token_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Revoke a PAT by ID (soft delete)."""
+    # Query token by ID
+    token = db.execute(
+        select(PersonalAccessToken).where(PersonalAccessToken.id == token_id)
+    ).scalar_one_or_none()
+
+    # Check if token exists
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "success": False,
+                "error": "Not Found",
+                "message": "Token not found",
+            },
+        )
+
+    # Check if token belongs to current user
+    if token.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "success": False,
+                "error": "Not Found",
+                "message": "Token not found",
+            },
+        )
+
+    # Soft delete: mark as revoked (idempotent)
+    token.is_revoked = True
+    db.commit()
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
