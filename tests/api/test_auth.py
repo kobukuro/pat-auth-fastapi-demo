@@ -1,4 +1,5 @@
 from tests.constants import URLs
+from sqlalchemy import select
 
 
 def test_register_success(client):
@@ -108,8 +109,7 @@ def test_login_inactive_user(client, db):
     # Set user as inactive
     from app.models.user import User
 
-    user = db.execute(
-        __import__("sqlalchemy").select(User).where(User.username == "inactiveuser")
+    user = db.execute(select(User).where(User.username == "inactiveuser")
     ).scalar_one()
     user.is_active = False
     db.commit()
