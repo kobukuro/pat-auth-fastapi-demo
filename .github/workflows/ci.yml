@@ -25,8 +25,11 @@ jobs:
         env:
           POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
 
+      - name: Install test dependencies
+        run: docker compose exec -T app pip install --no-cache-dir -r requirements-dev.txt
+
       - name: Run tests
-        run: docker compose exec -T app uv run pytest -v
+        run: docker compose exec -T app pytest -v
 
       - name: Stop containers
         if: always()
