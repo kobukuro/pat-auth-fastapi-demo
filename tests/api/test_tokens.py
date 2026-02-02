@@ -482,3 +482,176 @@ def test_get_token_no_sensitive_data(client):
 
     # Verify only prefix is shown
     assert token_data["token_prefix"] == full_token[:8]
+
+
+# Revoke Token Tests
+
+
+def test_revoke_token_success(client):
+    """Test revoking a token successfully."""
+    jwt = _get_jwt(client)
+
+    # Create a token
+    create_response = client.post(
+        URLs.TOKENS,
+        headers={"Authorization": f"Bearer {jwt}"},
+        json={
+            "name": "Test Token",
+            "scopes": ["fcs:read"],
+            "expires_in_days": 30,
+        },
+    )
+    token_id = create_response.json()["data"]["id"]
+
+    # Revoke the token
+    response = client.delete(
+        f"{URLs.TOKENS}/{token_id}",
+        headers={"Authorization": f"Bearer {jwt}"},
+    )
+
+    assert response.status_code == 204
+    assert len(response.content) == 0  # No content
+
+
+def test_revoke_token_not_found(client):
+    """Test revoking a non-existent token returns 404."""
+    jwt = _get_jwt(client)
+
+    response = client.delete(
+        f"{URLs.TOKENS}/99999",
+        headers={"Authorization": f"Bearer {jwt}"},
+    )
+
+    assert response.status_code == 404
+    data = response.json()
+    assert "detail" in data
+    assert data["detail"]["success"] is False
+    assert data["detail"]["error"] == "Not Found"
+
+
+def test_revoke_token_without_jwt(client):
+    """Test that revoking a token requires authentication."""
+    response = client.delete(f"{URLs.TOKENS}/1")
+
+    assert response.status_code == 401
+
+
+def test_revoke_token_invalid_jwt(client):
+    """Test that invalid JWT returns 401."""
+    response = client.delete(
+        f"{URLs.TOKENS}/1",
+        headers={"Authorization": "Bearer invalid_token"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_revoke_token_other_user_token(client):
+    """Test that users cannot revoke tokens owned by other users."""
+    # Create first user and token
+    jwt1 = _get_jwt(client)
+    create_response = client.post(
+        URLs.TOKENS,
+        headers={"Authorization": f"Bearer {jwt1}"},
+        json={
+            "name": "User1 Token",
+            "scopes": ["fcs:read"],
+            "expires_in_days": 30,
+        },
+    )
+    token_id = create_response.json()["data"]["id"]
+
+    # Create second user
+    client.post(
+        URLs.REGISTER,
+        json={"username": "user2", "password": "password123"},
+    )
+    login_response = client.post(
+        URLs.LOGIN,
+        json={"username": "user2", "password": "password123"},
+    )
+    jwt2 = login_response.json()["data"]["access_token"]
+
+    # User2 tries to revoke User1's token
+    response = client.delete(
+        f"{URLs.TOKENS}/{token_id}",
+        headers={"Authorization": f"Bearer {jwt2}"},
+    )
+
+    # Should return 404 (not 403) for security
+    assert response.status_code == 404
+    data = response.json()
+    assert "detail" in data
+    assert data["detail"]["success"] is False
+
+
+def test_revoke_token_idempotent(client):
+    """Test that revoking an already revoked token is idempotent."""
+    jwt = _get_jwt(client)
+
+    # Create a token
+    create_response = client.post(
+        URLs.TOKENS,
+        headers={"Authorization": f"Bearer {jwt}"},
+        json={
+            "name": "Test Token",
+            "scopes": ["fcs:read"],
+            "expires_in_days": 30,
+        },
+    )
+    token_id = create_response.json()["data"]["id"]
+
+    # Revoke the token first time
+    response1 = client.delete(
+        f"{URLs.TOKENS}/{token_id}",
+        headers={"Authorization": f"Bearer {jwt}"},
+    )
+    assert response1.status_code == 204
+
+    # Revoke again (should succeed - idempotent)
+    response2 = client.delete(
+        f"{URLs.TOKENS}/{token_id}",
+        headers={"Authorization": f"Bearer {jwt}"},
+    )
+    assert response2.status_code == 204
+
+
+def test_revoked_token_still_in_list(client):
+    """Test that revoked tokens are still shown but marked as revoked."""
+    from sqlalchemy import select
+    from app.models.pat import PersonalAccessToken
+
+    jwt = _get_jwt(client)
+
+    # Create a token
+    create_response = client.post(
+        URLs.TOKENS,
+        headers={"Authorization": f"Bearer {jwt}"},
+        json={
+            "name": "Test Token",
+            "scopes": ["fcs:read"],
+            "expires_in_days": 30,
+        },
+    )
+    token_id = create_response.json()["data"]["id"]
+
+    # Revoke the token
+    client.delete(
+        f"{URLs.TOKENS}/{token_id}",
+        headers={"Authorization": f"Bearer {jwt}"},
+    )
+
+    # List tokens - revoked token should still appear but marked
+    response = client.get(
+        URLs.TOKENS,
+        headers={"Authorization": f"Bearer {jwt}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    tokens = data["data"]
+
+    # Find the revoked token
+    revoked_token = next((t for t in tokens if t["id"] == token_id), None)
+    assert revoked_token is not None
+    assert revoked_token["is_revoked"] is True
