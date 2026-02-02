@@ -618,8 +618,6 @@ def test_revoke_token_idempotent(client):
 
 def test_revoked_token_still_in_list(client):
     """Test that revoked tokens are still shown but marked as revoked."""
-    from sqlalchemy import select
-    from app.models.pat import PersonalAccessToken
 
     jwt = _get_jwt(client)
 
