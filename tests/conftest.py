@@ -7,7 +7,7 @@ from app.main import app
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_database():
-    """Create all tables and seed data at the start of the test session."""
+    """Create all tables at the start of the test session."""
     Base.metadata.create_all(bind=engine)
     yield
     Base.metadata.drop_all(bind=engine)
