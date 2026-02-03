@@ -45,3 +45,36 @@ def list_workspaces(
             your_scopes=auth.scopes,
         ),
     )
+
+
+@router.post(
+    "",
+    response_model=APIResponse[WorkspacesStubResponseData],
+    status_code=status.HTTP_200_OK,
+)
+def create_workspace(
+    auth: AuthContext = Depends(require_scope("workspaces:write")),
+):
+    """
+    Stub endpoint for creating a workspace.
+
+    This endpoint requires workspaces:write scope and returns metadata about
+    the endpoint and permission check, rather than actual workspace data.
+    It demonstrates the scope-based authorization system for write operations.
+
+    Args:
+        auth: AuthContext containing PAT, scopes, and permission info
+
+    Returns:
+        APIResponse with WorkspacesStubResponseData containing endpoint metadata
+    """
+    return APIResponse(
+        success=True,
+        data=WorkspacesStubResponseData(
+            endpoint=auth.endpoint,
+            method=auth.method,
+            required_scope=auth.required_scope,
+            granted_by=auth.granted_by,
+            your_scopes=auth.scopes,
+        ),
+    )
