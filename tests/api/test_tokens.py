@@ -908,12 +908,3 @@ def test_get_token_logs_ordered_by_timestamp(client, db):
     # Should be ordered by timestamp descending (newest first)
     timestamps = [log["timestamp"] for log in logs]
     assert timestamps == sorted(timestamps, reverse=True)
-
-
-def test_ci_failure_verification(client):
-    """Intentional failing test to verify CI catches test failures.
-
-    This test should fail to confirm that GitHub Actions properly
-    detects and reports test failures.
-    """
-    assert False, "Intentional failure to verify CI detects test failures"
