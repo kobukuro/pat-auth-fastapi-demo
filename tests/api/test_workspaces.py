@@ -660,3 +660,254 @@ def test_workspaces_post_cross_resource_with_correct_scope(client):
     )
 
     assert response.status_code == 200
+
+
+# DELETE Endpoint Tests
+
+
+def test_workspaces_delete_success_with_exact_scope(client):
+    """Test DELETE access with exact required scope (workspaces:delete)."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["workspaces:delete"])
+
+    response = client.delete(
+        URLs.WORKSPACES_DELETE.format("123"),
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["data"]["endpoint"] == "/api/v1/workspaces/123"
+    assert data["data"]["method"] == "DELETE"
+    assert data["data"]["required_scope"] == "workspaces:delete"
+    assert data["data"]["granted_by"] == "workspaces:delete"
+    assert data["data"]["your_scopes"] == ["workspaces:delete"]
+
+
+def test_workspaces_delete_success_with_admin_scope(client):
+    """Test DELETE access with workspaces:admin scope (higher than delete)."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["workspaces:admin"])
+
+    response = client.delete(
+        URLs.WORKSPACES_DELETE.format("456"),
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["data"]["granted_by"] == "workspaces:admin"
+
+
+def test_workspaces_delete_success_with_multiple_scopes(client):
+    """Test DELETE access with multiple scopes including valid one."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:read", "workspaces:delete", "users:read"])
+
+    response = client.delete(
+        URLs.WORKSPACES_DELETE.format("789"),
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["data"]["granted_by"] == "workspaces:delete"
+    assert set(data["data"]["your_scopes"]) == {"fcs:read", "workspaces:delete", "users:read"}
+
+
+def test_workspaces_delete_success_highest_scope_wins(client):
+    """Test that highest granting scope is returned when multiple apply."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["workspaces:delete", "workspaces:admin"])
+
+    response = client.delete(
+        URLs.WORKSPACES_DELETE.format("999"),
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["data"]["granted_by"] == "workspaces:admin"
+
+
+def test_workspaces_delete_forbidden_read_scope_only(client):
+    """Test 403 when only having workspaces:read scope (insufficient for DELETE)."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["workspaces:read"])
+
+    response = client.delete(
+        URLs.WORKSPACES_DELETE.format("1"),
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 403
+    data = response.json()["detail"]
+    assert data["success"] is False
+    assert data["error"] == "Forbidden"
+    assert data["data"]["required_scope"] == "workspaces:delete"
+    assert data["data"]["your_scopes"] == ["workspaces:read"]
+
+
+def test_workspaces_delete_forbidden_write_scope_only(client):
+    """Test 403 when only having workspaces:write scope (insufficient for DELETE)."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["workspaces:write"])
+
+    response = client.delete(
+        URLs.WORKSPACES_DELETE.format("2"),
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 403
+    data = response.json()["detail"]
+    assert data["success"] is False
+    assert data["error"] == "Forbidden"
+    assert data["data"]["required_scope"] == "workspaces:delete"
+    assert data["data"]["your_scopes"] == ["workspaces:write"]
+
+
+def test_workspaces_delete_forbidden_missing_scope(client):
+    """Test 403 when required workspaces scope is missing."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:read", "users:read"])
+
+    response = client.delete(
+        URLs.WORKSPACES_DELETE.format("3"),
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 403
+    data = response.json()["detail"]
+    assert data["success"] is False
+    assert data["error"] == "Forbidden"
+    assert data["data"]["required_scope"] == "workspaces:delete"
+    assert set(data["data"]["your_scopes"]) == {"fcs:read", "users:read"}
+
+
+def test_workspaces_delete_forbidden_different_resource(client):
+    """Test that scopes from different resources don't grant DELETE access."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:analyze", "users:write"])
+
+    response = client.delete(
+        URLs.WORKSPACES_DELETE.format("4"),
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 403
+    data = response.json()["detail"]
+    assert data["data"]["required_scope"] == "workspaces:delete"
+
+
+def test_workspaces_delete_unauthorized_no_token(client):
+    """Test 401 when no token provided for DELETE."""
+    response = client.delete(URLs.WORKSPACES_DELETE.format("5"))
+
+    assert response.status_code == 401
+
+
+def test_workspaces_delete_unauthorized_invalid_token(client):
+    """Test 401 with invalid token for DELETE."""
+    response = client.delete(
+        URLs.WORKSPACES_DELETE.format("6"),
+        headers={"Authorization": "Bearer invalid_token"},
+    )
+
+    assert response.status_code == 401
+    data = response.json()
+    assert data["detail"]["success"] is False
+    assert data["detail"]["error"] == "Unauthorized"
+    assert data["detail"]["message"] == "Invalid token"
+
+
+def test_workspaces_delete_unauthorized_revoked_token(client, db):
+    """Test 401 with revoked token for DELETE."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["workspaces:delete"])
+
+    # Revoke the token
+    token_hash = hashlib.sha256(pat.encode()).hexdigest()
+    pat_record = db.execute(
+        select(PersonalAccessToken).where(PersonalAccessToken.token_hash == token_hash)
+    ).scalar_one()
+    pat_record.is_revoked = True
+    db.commit()
+
+    response = client.delete(
+        URLs.WORKSPACES_DELETE.format("7"),
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 401
+    data = response.json()
+    assert data["detail"]["success"] is False
+    assert data["detail"]["message"] == "Token revoked"
+
+
+def test_workspaces_delete_unauthorized_expired_token(client, db):
+    """Test 401 with expired token for DELETE."""
+    jwt = _get_jwt(client)
+
+    # Create a normal token first
+    pat = _create_pat(client, jwt, ["workspaces:delete"], name="Expired Token")
+
+    # Manually set expiration to the past in the database
+    token_hash = hashlib.sha256(pat.encode()).hexdigest()
+    pat_record = db.execute(
+        select(PersonalAccessToken).where(PersonalAccessToken.token_hash == token_hash)
+    ).scalar_one()
+    # Set expiration to yesterday
+    pat_record.expires_at = datetime.now(timezone.utc) - timedelta(days=1)
+    db.commit()
+
+    response = client.delete(
+        URLs.WORKSPACES_DELETE.format("8"),
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 401
+    data = response.json()
+    assert data["detail"]["success"] is False
+    assert data["detail"]["message"] == "Token expired"
+
+
+def test_workspaces_delete_scope_hierarchy_admin_grants_delete(client, db):
+    """Verify workspaces:admin grants workspaces:delete access."""
+    assert has_permission(db, ["workspaces:admin"], "workspaces:delete") is True
+
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["workspaces:admin"])
+
+    response = client.delete(
+        URLs.WORKSPACES_DELETE.format("9"),
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["granted_by"] == "workspaces:admin"
+
+
+def test_workspaces_delete_scope_hierarchy_delete_does_not_grant_admin(db):
+    """Verify workspaces:delete does NOT grant workspaces:admin access."""
+    assert has_permission(db, ["workspaces:delete"], "workspaces:admin") is False
+
+
+def test_workspaces_delete_no_cross_resource_fcs_to_workspaces(db):
+    """Verify fcs:analyze does NOT grant workspaces:delete access."""
+    assert has_permission(db, ["fcs:analyze"], "workspaces:delete") is False
+
+
+def test_workspaces_delete_cross_resource_with_correct_scope(client):
+    """Test DELETE that having correct scope works regardless of other resource scopes."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:analyze", "workspaces:delete"])
+
+    response = client.delete(
+        URLs.WORKSPACES_DELETE.format("10"),
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 200

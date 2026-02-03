@@ -3,3 +3,4 @@ class URLs:
     LOGIN = "/api/v1/auth/login"
     TOKENS = "/api/v1/tokens"
     WORKSPACES = "/api/v1/workspaces"
+    WORKSPACES_DELETE = "/api/v1/workspaces/{}"
