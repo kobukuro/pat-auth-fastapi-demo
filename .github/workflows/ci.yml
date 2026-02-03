@@ -12,26 +12,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build and start containers
-        run: docker compose up -d --build
+      - name: Run tests with test profile
+        run: docker compose --profile test up --abort-on-container-exit --build
         env:
           POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
           JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
 
-      - name: Wait for services
-        run: |
-          timeout 30 bash -c 'until docker compose exec -T db pg_isready; do sleep 1; done'
-        env:
-          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
-
-      - name: Install test dependencies
-        run: docker compose exec -T app pip install --no-cache-dir -r requirements-dev.txt
-
-      - name: Run tests
-        run: docker compose exec -T app pytest -v
-
-      - name: Stop containers
+      - name: Cleanup
         if: always()
-        run: docker compose down -v
+        run: docker compose --profile test down -v

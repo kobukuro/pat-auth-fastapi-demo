@@ -14,9 +14,13 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    profiles:
+      - dev
+      - test
 
   app:
-    build: .
+    build:
+      target: development
     ports:
       - "8000:8000"
     environment:
@@ -25,6 +29,20 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    profiles:
+      - dev
+
+  test:
+    build:
+      target: test
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+    depends_on:
+      db:
+        condition: service_healthy
+    profiles:
+      - test
 
 volumes:
   postgres_data:
