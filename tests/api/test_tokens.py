@@ -1,7 +1,9 @@
 import hashlib
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 
+from app.models.audit_log import PersonalAccessTokenAuditLog
 from app.models.pat import PersonalAccessToken
 from app.services.pat import has_permission
 from tests.constants import URLs
@@ -618,8 +620,6 @@ def test_revoke_token_idempotent(client):
 
 def test_revoked_token_still_in_list(client):
     """Test that revoked tokens are still shown but marked as revoked."""
-    from sqlalchemy import select
-    from app.models.pat import PersonalAccessToken
 
     jwt = _get_jwt(client)
 
@@ -655,3 +655,256 @@ def test_revoked_token_still_in_list(client):
     revoked_token = next((t for t in tokens if t["id"] == token_id), None)
     assert revoked_token is not None
     assert revoked_token["is_revoked"] is True
+
+
+# Get Token Logs Tests
+
+
+def test_get_token_logs_success(client, db):
+    """Test getting audit logs for a token."""
+    jwt = _get_jwt(client)
+
+    # Create a token
+    create_response = client.post(
+        URLs.TOKENS,
+        headers={"Authorization": f"Bearer {jwt}"},
+        json={
+            "name": "Test Token",
+            "scopes": ["fcs:read"],
+            "expires_in_days": 30,
+        },
+    )
+    token_id = create_response.json()["data"]["id"]
+
+    # Manually create audit log entries for testing
+    # (middleware doesn't work in test due to DB session isolation)
+    log_entry = PersonalAccessTokenAuditLog(
+        token_id=token_id,
+        timestamp=datetime.now(timezone.utc),
+        ip_address="127.0.0.1",
+        method="GET",
+        endpoint="/api/v1/tokens/test",
+        status_code=200,
+        authorized=True,
+        reason=None,
+    )
+    db.add(log_entry)
+    db.commit()
+
+    # Get the logs
+    response = client.get(
+        f"{URLs.TOKENS}/{token_id}/logs",
+        headers={"Authorization": f"Bearer {jwt}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["data"]["token_id"] == str(token_id)
+    assert data["data"]["token_name"] == "Test Token"
+    assert "total_logs" in data["data"]
+    assert "logs" in data["data"]
+    assert isinstance(data["data"]["logs"], list)
+
+
+def test_get_token_logs_not_found(client):
+    """Test getting logs for non-existent token returns 404."""
+    jwt = _get_jwt(client)
+
+    response = client.get(
+        f"{URLs.TOKENS}/99999/logs",
+        headers={"Authorization": f"Bearer {jwt}"},
+    )
+
+    assert response.status_code == 404
+    data = response.json()
+    assert "detail" in data
+    assert data["detail"]["success"] is False
+    assert data["detail"]["error"] == "Not Found"
+
+
+def test_get_token_logs_without_jwt(client):
+    """Test that getting logs requires authentication."""
+    response = client.get(f"{URLs.TOKENS}/1/logs")
+
+    assert response.status_code == 401
+
+
+def test_get_token_logs_invalid_jwt(client):
+    """Test that invalid JWT returns 401."""
+    response = client.get(
+        f"{URLs.TOKENS}/1/logs",
+        headers={"Authorization": "Bearer invalid_token"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_get_token_logs_other_user_token(client):
+    """Test that users cannot access logs for tokens owned by other users."""
+    # Create first user and token
+    jwt1 = _get_jwt(client)
+    create_response = client.post(
+        URLs.TOKENS,
+        headers={"Authorization": f"Bearer {jwt1}"},
+        json={
+            "name": "User1 Token",
+            "scopes": ["fcs:read"],
+            "expires_in_days": 30,
+        },
+    )
+    token_id = create_response.json()["data"]["id"]
+
+    # Create second user
+    client.post(
+        URLs.REGISTER,
+        json={"username": "user2", "password": "password123"},
+    )
+    login_response = client.post(
+        URLs.LOGIN,
+        json={"username": "user2", "password": "password123"},
+    )
+    jwt2 = login_response.json()["data"]["access_token"]
+
+    # User2 tries to access User1's token logs
+    response = client.get(
+        f"{URLs.TOKENS}/{token_id}/logs",
+        headers={"Authorization": f"Bearer {jwt2}"},
+    )
+
+    # Should return 404 (not 403) for security
+    assert response.status_code == 404
+    data = response.json()
+    assert "detail" in data
+    assert data["detail"]["success"] is False
+
+
+def test_get_token_logs_empty(client):
+    """Test getting logs for a token with no usage returns empty list."""
+    jwt = _get_jwt(client)
+
+    # Create a token but don't use it
+    create_response = client.post(
+        URLs.TOKENS,
+        headers={"Authorization": f"Bearer {jwt}"},
+        json={
+            "name": "Unused Token",
+            "scopes": ["fcs:read"],
+            "expires_in_days": 30,
+        },
+    )
+    token_id = create_response.json()["data"]["id"]
+
+    # Get the logs
+    response = client.get(
+        f"{URLs.TOKENS}/{token_id}/logs",
+        headers={"Authorization": f"Bearer {jwt}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["data"]["total_logs"] == 0
+    assert len(data["data"]["logs"]) == 0
+
+
+def test_get_token_logs_entries_structure(client, db):
+    """Test that log entries have the correct structure."""
+    jwt = _get_jwt(client)
+
+    # Create a token
+    create_response = client.post(
+        URLs.TOKENS,
+        headers={"Authorization": f"Bearer {jwt}"},
+        json={
+            "name": "Test Token",
+            "scopes": ["fcs:read"],
+            "expires_in_days": 30,
+        },
+    )
+    token_id = create_response.json()["data"]["id"]
+
+    # Manually create audit log entry for testing
+    log_entry = PersonalAccessTokenAuditLog(
+        token_id=token_id,
+        timestamp=datetime.now(timezone.utc),
+        ip_address="127.0.0.1",
+        method="GET",
+        endpoint="/api/v1/tokens/test",
+        status_code=200,
+        authorized=True,
+        reason=None,
+    )
+    db.add(log_entry)
+    db.commit()
+
+    # Get the logs
+    response = client.get(
+        f"{URLs.TOKENS}/{token_id}/logs",
+        headers={"Authorization": f"Bearer {jwt}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    logs = data["data"]["logs"]
+
+    assert len(logs) >= 1
+
+    # Check structure of first log entry
+    log = logs[0]
+    assert "timestamp" in log
+    assert "ip_address" in log
+    assert "method" in log
+    assert "endpoint" in log
+    assert "status_code" in log
+    assert "authorized" in log
+    assert "reason" in log  # Can be None
+
+
+def test_get_token_logs_ordered_by_timestamp(client, db):
+    """Test that logs are ordered by timestamp (newest first)."""
+    jwt = _get_jwt(client)
+
+    # Create a token
+    create_response = client.post(
+        URLs.TOKENS,
+        headers={"Authorization": f"Bearer {jwt}"},
+        json={
+            "name": "Test Token",
+            "scopes": ["fcs:read"],
+            "expires_in_days": 30,
+        },
+    )
+    token_id = create_response.json()["data"]["id"]
+
+    # Manually create multiple audit log entries
+    import time
+
+    for i in range(3):
+        log_entry = PersonalAccessTokenAuditLog(
+            token_id=token_id,
+            timestamp=datetime.now(timezone.utc),
+            ip_address="127.0.0.1",
+            method="GET",
+            endpoint=f"/api/v1/tokens/test?req={i}",
+            status_code=200,
+            authorized=True,
+            reason=None,
+        )
+        db.add(log_entry)
+        db.commit()
+        time.sleep(0.01)
+
+    # Get the logs
+    response = client.get(
+        f"{URLs.TOKENS}/{token_id}/logs",
+        headers={"Authorization": f"Bearer {jwt}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    logs = data["data"]["logs"]
+
+    # Should be ordered by timestamp descending (newest first)
+    timestamps = [log["timestamp"] for log in logs]
+    assert timestamps == sorted(timestamps, reverse=True)
