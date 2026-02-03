@@ -34,6 +34,15 @@ class FCSParametersData:
     parameters: list[FCSParameter]
 
 
+@dataclass
+class FCSEventsData:
+    """Complete FCS events response data."""
+    total_events: int
+    limit: int
+    offset: int
+    events: list[dict[str, float | int]]
+
+
 def get_sample_fcs_path() -> str:
     """
     Return the sample FCS file path.
@@ -149,3 +158,74 @@ def get_fcs_file_path(file_id: str | None, db) -> tuple[str, object | None]:
         raise ValueError(f"FCS file with file_id '{file_id}' not found")
 
     return fcs_file.file_path, fcs_file
+
+
+def get_fcs_events(file_path: str, limit: int = 100, offset: int = 0) -> FCSEventsData:
+    """
+    Parse FCS file and extract events data with pagination.
+
+    Uses flowio.FlowData().as_array() to retrieve event data as 2-D NumPy array.
+    Each row is one event, each column is one parameter.
+
+    Args:
+        file_path: Path to the FCS file.
+        limit: Maximum number of events to return (default: 100).
+        offset: Number of events to skip from the beginning (default: 0).
+
+    Returns:
+        FCSEventsData containing total_events, limit, offset, and events list.
+
+    Raises:
+        FileNotFoundError: If the FCS file does not exist.
+        ValueError: If the file is not a valid FCS file.
+    """
+    # Check if file exists
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"FCS file not found: {file_path}")
+
+    # Parse FCS file
+    fcs = FlowData(file_path)
+    total_events = fcs.event_count
+
+    # Get parameter names (PnN labels) for dictionary keys
+    pnn_labels = fcs.pnn_labels if hasattr(fcs, "pnn_labels") else []
+
+    # Get event data as 2-D NumPy array
+    events_array = fcs.as_array(preprocess=False)
+
+    # Handle offset beyond total events
+    if offset >= total_events:
+        return FCSEventsData(
+            total_events=total_events,
+            limit=limit,
+            offset=offset,
+            events=[]
+        )
+
+    # Apply pagination using NumPy slicing
+    end_index = min(offset + limit, total_events)
+    paginated_events = events_array[offset:end_index]
+
+    # Convert to list of dictionaries with parameter names as keys
+    events_list = []
+    for event_row in paginated_events:
+        event_dict = {}
+        for i, param_name in enumerate(pnn_labels):
+            if i < len(event_row):
+                value = event_row[i]
+                # Convert to int if whole number for cleaner JSON output
+                if isinstance(value, (int, float)):
+                    if value == int(value):
+                        event_dict[str(param_name)] = int(value)
+                    else:
+                        event_dict[str(param_name)] = float(value)
+                else:
+                    event_dict[str(param_name)] = value
+        events_list.append(event_dict)
+
+    return FCSEventsData(
+        total_events=total_events,
+        limit=limit,
+        offset=offset,
+        events=events_list
+    )

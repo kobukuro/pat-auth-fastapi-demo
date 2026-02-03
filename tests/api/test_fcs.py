@@ -362,6 +362,251 @@ def test_fcs_parameters_unauthorized_expired_token(client, db):
     assert data["detail"]["message"] == "Token expired"
 
 
+# ========================================
+# FCS Events Endpoint Tests
+# ========================================
+
+
+def test_fcs_events_sample_file_with_fcs_read(client):
+    """Test access with exact required scope (fcs:read)."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:read"])
+
+    response = client.get(
+        URLs.FCS_EVENTS,
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["data"]["total_events"] == 34297
+    assert data["data"]["limit"] == 100
+    assert data["data"]["offset"] == 0
+    assert len(data["data"]["events"]) == 100
+
+
+def test_fcs_events_with_custom_limit(client):
+    """Test pagination with custom limit."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:read"])
+
+    response = client.get(
+        f"{URLs.FCS_EVENTS}?limit=50",
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["data"]["limit"] == 50
+    assert len(data["data"]["events"]) == 50
+
+
+def test_fcs_events_with_offset(client):
+    """Test pagination with offset."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:read"])
+
+    response = client.get(
+        f"{URLs.FCS_EVENTS}?offset=100",
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["data"]["offset"] == 100
+    assert len(data["data"]["events"]) == 100
+
+
+def test_fcs_events_with_limit_and_offset(client):
+    """Test pagination with both limit and offset."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:read"])
+
+    response = client.get(
+        f"{URLs.FCS_EVENTS}?limit=25&offset=200",
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["data"]["limit"] == 25
+    assert data["data"]["offset"] == 200
+    assert len(data["data"]["events"]) == 25
+
+
+def test_fcs_events_offset_beyond_total(client):
+    """Test when offset exceeds total events."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:read"])
+
+    response = client.get(
+        f"{URLs.FCS_EVENTS}?offset=100000",
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["data"]["events"] == []
+
+
+def test_fcs_events_first_event_structure(client):
+    """Test that first event has correct structure."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:read"])
+
+    response = client.get(
+        URLs.FCS_EVENTS,
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    events = data["data"]["events"]
+    first_event = events[0]
+
+    # Check that expected parameter names exist
+    expected_params = ["FSC-H", "FSC-A", "SSC-H", "SSC-A"]
+    for param in expected_params:
+        assert param in first_event
+
+    # Check that values are numeric
+    for value in first_event.values():
+        assert isinstance(value, (int, float))
+
+
+def test_fcs_events_all_events_have_same_parameters(client):
+    """Test that all events have consistent parameter structure."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:read"])
+
+    response = client.get(
+        URLs.FCS_EVENTS,
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    events = data["data"]["events"]
+
+    # Get parameter names from first event
+    first_event_params = set(events[0].keys())
+
+    # Verify all events have same parameters
+    for event in events[1:]:
+        assert set(event.keys()) == first_event_params
+
+
+def test_fcs_events_forbidden_without_fcs_scope(client):
+    """Test 403 when required fcs scope is missing."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["workspaces:read", "users:read"])
+
+    response = client.get(
+        URLs.FCS_EVENTS,
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 403
+    data = response.json()["detail"]
+    assert data["success"] is False
+    assert data["error"] == "Forbidden"
+    assert data["data"]["required_scope"] == "fcs:read"
+
+
+def test_fcs_events_unauthorized_no_token(client):
+    """Test 401 when no token provided."""
+    response = client.get(URLs.FCS_EVENTS)
+    assert response.status_code == 401
+
+
+def test_fcs_events_unauthorized_invalid_token(client):
+    """Test 401 with invalid token."""
+    response = client.get(
+        URLs.FCS_EVENTS,
+        headers={"Authorization": "Bearer invalid_token"},
+    )
+    assert response.status_code == 401
+
+
+def test_fcs_events_with_fcs_write_scope(client):
+    """Test access with fcs:write scope (higher than read)."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:write"])
+
+    response = client.get(
+        URLs.FCS_EVENTS,
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_fcs_events_with_fcs_analyze_scope(client):
+    """Test access with fcs:analyze scope (highest level)."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:analyze"])
+
+    response = client.get(
+        URLs.FCS_EVENTS,
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_fcs_events_limit_max_value(client):
+    """Test maximum limit value (10000)."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:read"])
+
+    response = client.get(
+        f"{URLs.FCS_EVENTS}?limit=10000",
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_fcs_events_limit_exceeds_max(client):
+    """Test that limit exceeding max is rejected."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:read"])
+
+    response = client.get(
+        f"{URLs.FCS_EVENTS}?limit=10001",
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 422  # Validation error
+
+
+def test_fcs_events_negative_limit(client):
+    """Test that negative limit is rejected."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:read"])
+
+    response = client.get(
+        f"{URLs.FCS_EVENTS}?limit=-1",
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_fcs_events_negative_offset(client):
+    """Test that negative offset is rejected."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:read"])
+
+    response = client.get(
+        f"{URLs.FCS_EVENTS}?offset=-1",
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 422
+
+
 # Reserved tests for future file upload functionality
 # These will be implemented when POST /api/v1/fcs/upload is added
 
