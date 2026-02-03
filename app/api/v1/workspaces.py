@@ -78,3 +78,38 @@ def create_workspace(
             your_scopes=auth.scopes,
         ),
     )
+
+
+@router.delete(
+    "/{id}",
+    response_model=APIResponse[WorkspacesStubResponseData],
+    status_code=status.HTTP_200_OK,
+)
+def delete_workspace(
+    id: str,
+    auth: AuthContext = Depends(require_scope("workspaces:delete")),
+):
+    """
+    Stub endpoint for deleting a workspace.
+
+    This endpoint requires workspaces:delete scope and returns metadata about
+    the endpoint and permission check, rather than actual workspace data.
+    It demonstrates the scope-based authorization system for delete operations.
+
+    Args:
+        id: The workspace ID to delete
+        auth: AuthContext containing PAT, scopes, and permission info
+
+    Returns:
+        APIResponse with WorkspacesStubResponseData containing endpoint metadata
+    """
+    return APIResponse(
+        success=True,
+        data=WorkspacesStubResponseData(
+            endpoint=f"/api/v1/workspaces/{id}",
+            method="DELETE",
+            required_scope=auth.required_scope,
+            granted_by=auth.granted_by,
+            your_scopes=auth.scopes,
+        ),
+    )
