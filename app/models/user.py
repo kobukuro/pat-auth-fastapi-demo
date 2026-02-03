@@ -8,6 +8,7 @@ from app.database import Base
 
 if TYPE_CHECKING:
     from app.models.pat import PersonalAccessToken
+    from app.models.fcs_file import FCSFile
 
 
 class User(Base):
@@ -24,4 +25,7 @@ class User(Base):
 
     tokens: Mapped[list["PersonalAccessToken"]] = relationship(
         "PersonalAccessToken", back_populates="user"
+    )
+    fcs_files: Mapped[list["FCSFile"]] = relationship(
+        "FCSFile", back_populates="user"
     )

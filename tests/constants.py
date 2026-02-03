@@ -6,3 +6,5 @@ class URLs:
     WORKSPACES_DELETE = "/api/v1/workspaces/{}"
     WORKSPACES_SETTINGS = "/api/v1/workspaces/{}/settings"
     USERS_ME = "/api/v1/users/me"
+    FCS_PARAMETERS = "/api/v1/fcs/parameters"
+    FCS_PARAMETERS_WITH_ID = "/api/v1/fcs/parameters?file_id={}"
