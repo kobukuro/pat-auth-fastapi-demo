@@ -4,3 +4,4 @@ class URLs:
     TOKENS = "/api/v1/tokens"
     WORKSPACES = "/api/v1/workspaces"
     WORKSPACES_DELETE = "/api/v1/workspaces/{}"
+    WORKSPACES_SETTINGS = "/api/v1/workspaces/{}/settings"

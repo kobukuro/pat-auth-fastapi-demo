@@ -911,3 +911,297 @@ def test_workspaces_delete_cross_resource_with_correct_scope(client):
     )
 
     assert response.status_code == 200
+
+
+# PUT Settings Endpoint Tests
+
+
+def test_workspaces_settings_success_with_exact_scope(client):
+    """Test PUT access with exact required scope (workspaces:admin)."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["workspaces:admin"])
+
+    response = client.put(
+        URLs.WORKSPACES_SETTINGS.format("123"),
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["data"]["endpoint"] == "/api/v1/workspaces/123/settings"
+    assert data["data"]["method"] == "PUT"
+    assert data["data"]["required_scope"] == "workspaces:admin"
+    assert data["data"]["granted_by"] == "workspaces:admin"
+    assert data["data"]["your_scopes"] == ["workspaces:admin"]
+
+
+def test_workspaces_settings_success_with_multiple_scopes(client):
+    """Test PUT access with multiple scopes including admin."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:read", "workspaces:admin", "users:write"])
+
+    response = client.put(
+        URLs.WORKSPACES_SETTINGS.format("456"),
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["data"]["granted_by"] == "workspaces:admin"
+    assert set(data["data"]["your_scopes"]) == {"fcs:read", "workspaces:admin", "users:write"}
+
+
+def test_workspaces_settings_success_highest_scope_wins(client):
+    """Test that admin is returned when multiple workspaces scopes apply."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["workspaces:admin", "workspaces:delete"])
+
+    response = client.put(
+        URLs.WORKSPACES_SETTINGS.format("789"),
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["data"]["granted_by"] == "workspaces:admin"
+
+
+def test_workspaces_settings_scope_hierarchy_only_admin_grants_access(client, db):
+    """Verify only workspaces:admin grants access to settings endpoint."""
+    assert has_permission(db, ["workspaces:read"], "workspaces:admin") is False
+    assert has_permission(db, ["workspaces:write"], "workspaces:admin") is False
+    assert has_permission(db, ["workspaces:delete"], "workspaces:admin") is False
+    assert has_permission(db, ["workspaces:admin"], "workspaces:admin") is True
+
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["workspaces:admin"])
+
+    response = client.put(
+        URLs.WORKSPACES_SETTINGS.format("999"),
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["granted_by"] == "workspaces:admin"
+
+
+def test_workspaces_settings_forbidden_read_scope_only(client):
+    """Test 403 when only having workspaces:read scope (insufficient for settings)."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["workspaces:read"])
+
+    response = client.put(
+        URLs.WORKSPACES_SETTINGS.format("1"),
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 403
+    data = response.json()["detail"]
+    assert data["success"] is False
+    assert data["error"] == "Forbidden"
+    assert data["data"]["required_scope"] == "workspaces:admin"
+    assert data["data"]["your_scopes"] == ["workspaces:read"]
+
+
+def test_workspaces_settings_forbidden_write_scope_only(client):
+    """Test 403 when only having workspaces:write scope (insufficient for settings)."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["workspaces:write"])
+
+    response = client.put(
+        URLs.WORKSPACES_SETTINGS.format("2"),
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 403
+    data = response.json()["detail"]
+    assert data["success"] is False
+    assert data["error"] == "Forbidden"
+    assert data["data"]["required_scope"] == "workspaces:admin"
+    assert data["data"]["your_scopes"] == ["workspaces:write"]
+
+
+def test_workspaces_settings_forbidden_delete_scope_only(client):
+    """Test 403 when only having workspaces:delete scope (insufficient for settings)."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["workspaces:delete"])
+
+    response = client.put(
+        URLs.WORKSPACES_SETTINGS.format("3"),
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 403
+    data = response.json()["detail"]
+    assert data["success"] is False
+    assert data["error"] == "Forbidden"
+    assert data["data"]["required_scope"] == "workspaces:admin"
+    assert data["data"]["your_scopes"] == ["workspaces:delete"]
+
+
+def test_workspaces_settings_forbidden_missing_scope(client):
+    """Test 403 when required workspaces scope is missing."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:read", "users:read"])
+
+    response = client.put(
+        URLs.WORKSPACES_SETTINGS.format("4"),
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 403
+    data = response.json()["detail"]
+    assert data["success"] is False
+    assert data["error"] == "Forbidden"
+    assert data["data"]["required_scope"] == "workspaces:admin"
+    assert set(data["data"]["your_scopes"]) == {"fcs:read", "users:read"}
+
+
+def test_workspaces_settings_forbidden_different_resource(client):
+    """Test that scopes from different resources don't grant PUT settings access."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:analyze", "users:write"])
+
+    response = client.put(
+        URLs.WORKSPACES_SETTINGS.format("5"),
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 403
+    data = response.json()["detail"]
+    assert data["data"]["required_scope"] == "workspaces:admin"
+
+
+def test_workspaces_settings_unauthorized_no_token(client):
+    """Test 401 when no token provided for PUT settings."""
+    response = client.put(URLs.WORKSPACES_SETTINGS.format("6"))
+
+    assert response.status_code == 401
+
+
+def test_workspaces_settings_unauthorized_invalid_token(client):
+    """Test 401 with invalid token for PUT settings."""
+    response = client.put(
+        URLs.WORKSPACES_SETTINGS.format("7"),
+        headers={"Authorization": "Bearer invalid_token"},
+    )
+
+    assert response.status_code == 401
+    data = response.json()
+    assert data["detail"]["success"] is False
+    assert data["detail"]["error"] == "Unauthorized"
+    assert data["detail"]["message"] == "Invalid token"
+
+
+def test_workspaces_settings_unauthorized_revoked_token(client, db):
+    """Test 401 with revoked token for PUT settings."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["workspaces:admin"])
+
+    # Revoke the token
+    token_hash = hashlib.sha256(pat.encode()).hexdigest()
+    pat_record = db.execute(
+        select(PersonalAccessToken).where(PersonalAccessToken.token_hash == token_hash)
+    ).scalar_one()
+    pat_record.is_revoked = True
+    db.commit()
+
+    response = client.put(
+        URLs.WORKSPACES_SETTINGS.format("8"),
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 401
+    data = response.json()
+    assert data["detail"]["success"] is False
+    assert data["detail"]["message"] == "Token revoked"
+
+
+def test_workspaces_settings_unauthorized_expired_token(client, db):
+    """Test 401 with expired token for PUT settings."""
+    jwt = _get_jwt(client)
+
+    # Create a normal token first
+    pat = _create_pat(client, jwt, ["workspaces:admin"], name="Expired Token")
+
+    # Manually set expiration to the past in the database
+    token_hash = hashlib.sha256(pat.encode()).hexdigest()
+    pat_record = db.execute(
+        select(PersonalAccessToken).where(PersonalAccessToken.token_hash == token_hash)
+    ).scalar_one()
+    # Set expiration to yesterday
+    pat_record.expires_at = datetime.now(timezone.utc) - timedelta(days=1)
+    db.commit()
+
+    response = client.put(
+        URLs.WORKSPACES_SETTINGS.format("9"),
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 401
+    data = response.json()
+    assert data["detail"]["success"] is False
+    assert data["detail"]["message"] == "Token expired"
+
+
+def test_workspaces_settings_unauthorized_jwt_instead_of_pat(client):
+    """Test that JWT tokens are not accepted for the settings endpoint."""
+    jwt = _get_jwt(client)
+
+    response = client.put(
+        URLs.WORKSPACES_SETTINGS.format("10"),
+        headers={"Authorization": f"Bearer {jwt}"},
+    )
+
+    # JWT doesn't start with "pat_", so should be treated as invalid PAT
+    assert response.status_code == 401
+    data = response.json()
+    assert data["detail"]["success"] is False
+    assert data["detail"]["message"] == "Invalid token"
+
+
+def test_workspaces_settings_unauthorized_non_pat_token(client):
+    """Test that tokens not starting with 'pat_' are rejected."""
+    response = client.put(
+        URLs.WORKSPACES_SETTINGS.format("11"),
+        headers={"Authorization": "Bearer some_random_token"},
+    )
+
+    assert response.status_code == 401
+    data = response.json()
+    assert data["detail"]["message"] == "Invalid token"
+
+
+def test_workspaces_settings_no_cross_resource(db):
+    """Verify fcs:analyze does NOT grant workspaces:admin access."""
+    assert has_permission(db, ["fcs:analyze"], "workspaces:admin") is False
+
+
+def test_workspaces_settings_cross_resource_with_correct_scope(client):
+    """Test PUT settings that having correct scope works regardless of other resource scopes."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:analyze", "workspaces:admin"])
+
+    response = client.put(
+        URLs.WORKSPACES_SETTINGS.format("12"),
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_workspaces_settings_scope_hierarchy_read_does_not_grant_admin(db):
+    """Verify workspaces:read does NOT grant workspaces:admin access."""
+    assert has_permission(db, ["workspaces:read"], "workspaces:admin") is False
+
+
+def test_workspaces_settings_scope_hierarchy_write_does_not_grant_admin(db):
+    """Verify workspaces:write does NOT grant workspaces:admin access."""
+    assert has_permission(db, ["workspaces:write"], "workspaces:admin") is False
+
+
+def test_workspaces_settings_scope_hierarchy_delete_does_not_grant_admin(db):
+    """Verify workspaces:delete does NOT grant workspaces:admin access."""
+    assert has_permission(db, ["workspaces:delete"], "workspaces:admin") is False
