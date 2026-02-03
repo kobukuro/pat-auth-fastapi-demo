@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies.auth import get_current_user
+from app.dependencies.token import get_validated_token
 from app.models.audit_log import PersonalAccessTokenAuditLog
 from app.models.pat import PersonalAccessToken
 from app.models.user import User
@@ -110,38 +111,9 @@ def list_tokens(
     status_code=status.HTTP_200_OK,
 )
 def get_token(
-        token_id: int,
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
+        token: PersonalAccessToken = Depends(get_validated_token),
 ):
     """Get a single PAT by ID."""
-    # Query token by ID
-    token = db.execute(
-        select(PersonalAccessToken).where(PersonalAccessToken.id == token_id)
-    ).scalar_one_or_none()
-
-    # Check if token exists
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "success": False,
-                "error": "Not Found",
-                "message": "Token not found",
-            },
-        )
-
-    # Check if token belongs to current user
-    if token.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "success": False,
-                "error": "Not Found",
-                "message": "Token not found",
-            },
-        )
-
     return APIResponse(
         success=True,
         data=PATListItemResponse(
@@ -162,42 +134,12 @@ def get_token(
     status_code=status.HTTP_204_NO_CONTENT,
 )
 def revoke_token(
-        token_id: int,
-        current_user: User = Depends(get_current_user),
+        token: PersonalAccessToken = Depends(get_validated_token),
         db: Session = Depends(get_db),
 ):
     """Revoke a PAT by ID (soft delete)."""
-    # Query token by ID
-    token = db.execute(
-        select(PersonalAccessToken).where(PersonalAccessToken.id == token_id)
-    ).scalar_one_or_none()
-
-    # Check if token exists
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "success": False,
-                "error": "Not Found",
-                "message": "Token not found",
-            },
-        )
-
-    # Check if token belongs to current user
-    if token.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "success": False,
-                "error": "Not Found",
-                "message": "Token not found",
-            },
-        )
-
-    # Soft delete: mark as revoked (idempotent)
     token.is_revoked = True
     db.commit()
-
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -207,41 +149,13 @@ def revoke_token(
     status_code=status.HTTP_200_OK,
 )
 def get_token_logs(
-        token_id: int,
-        current_user: User = Depends(get_current_user),
+        token: PersonalAccessToken = Depends(get_validated_token),
         db: Session = Depends(get_db),
 ):
     """Get audit logs for a specific PAT."""
-    # Query token by ID
-    token = db.execute(
-        select(PersonalAccessToken).where(PersonalAccessToken.id == token_id)
-    ).scalar_one_or_none()
-
-    # Check if token exists
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "success": False,
-                "error": "Not Found",
-                "message": "Token not found",
-            },
-        )
-
-    # Check if token belongs to current user
-    if token.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "success": False,
-                "error": "Not Found",
-                "message": "Token not found",
-            },
-        )
-
     # Query audit logs for this token
     logs_stmt = select(PersonalAccessTokenAuditLog).where(
-        PersonalAccessTokenAuditLog.token_id == token_id
+        PersonalAccessTokenAuditLog.token_id == token.id
     ).order_by(PersonalAccessTokenAuditLog.timestamp.desc())
 
     logs = db.execute(logs_stmt).scalars().all()
@@ -263,7 +177,7 @@ def get_token_logs(
     return APIResponse(
         success=True,
         data=TokenAuditLogsResponse(
-            token_id=str(token_id),
+            token_id=str(token.id),
             token_name=token.name,
             total_logs=len(log_entries),
             logs=log_entries,
