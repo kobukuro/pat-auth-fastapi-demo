@@ -7,8 +7,10 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies.auth import get_current_user
+from app.models.audit_log import PersonalAccessTokenAuditLog
 from app.models.pat import PersonalAccessToken
 from app.models.user import User
+from app.schemas.audit_log import AuditLogEntry, TokenAuditLogsResponse
 from app.schemas.common import APIResponse
 from app.schemas.pat import PATCreateRequest, PATCreateResponse, PATListItemResponse
 from app.services.pat import generate_pat, validate_scopes
@@ -22,9 +24,9 @@ router = APIRouter(prefix="/tokens", tags=["tokens"])
     status_code=status.HTTP_201_CREATED,
 )
 def create_token(
-    request: PATCreateRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+        request: PATCreateRequest,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
 ):
     # Validate scopes exist in DB
     if not validate_scopes(db, request.scopes):
@@ -75,8 +77,8 @@ def create_token(
     status_code=status.HTTP_200_OK,
 )
 def list_tokens(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
 ):
     """List all PATs belonging to the authenticated user."""
     stmt = select(PersonalAccessToken).where(
@@ -108,9 +110,9 @@ def list_tokens(
     status_code=status.HTTP_200_OK,
 )
 def get_token(
-    token_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+        token_id: int,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
 ):
     """Get a single PAT by ID."""
     # Query token by ID
@@ -160,9 +162,9 @@ def get_token(
     status_code=status.HTTP_204_NO_CONTENT,
 )
 def revoke_token(
-    token_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+        token_id: int,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
 ):
     """Revoke a PAT by ID (soft delete)."""
     # Query token by ID
@@ -197,3 +199,73 @@ def revoke_token(
     db.commit()
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get(
+    "/{token_id}/logs",
+    response_model=APIResponse[TokenAuditLogsResponse],
+    status_code=status.HTTP_200_OK,
+)
+def get_token_logs(
+        token_id: int,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
+):
+    """Get audit logs for a specific PAT."""
+    # Query token by ID
+    token = db.execute(
+        select(PersonalAccessToken).where(PersonalAccessToken.id == token_id)
+    ).scalar_one_or_none()
+
+    # Check if token exists
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "success": False,
+                "error": "Not Found",
+                "message": "Token not found",
+            },
+        )
+
+    # Check if token belongs to current user
+    if token.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "success": False,
+                "error": "Not Found",
+                "message": "Token not found",
+            },
+        )
+
+    # Query audit logs for this token
+    logs_stmt = select(PersonalAccessTokenAuditLog).where(
+        PersonalAccessTokenAuditLog.token_id == token_id
+    ).order_by(PersonalAccessTokenAuditLog.timestamp.desc())
+
+    logs = db.execute(logs_stmt).scalars().all()
+
+    # Convert to response format
+    log_entries = [
+        AuditLogEntry(
+            timestamp=log.timestamp,
+            ip_address=log.ip_address,
+            method=log.method,
+            endpoint=log.endpoint,
+            status_code=log.status_code,
+            authorized=log.authorized,
+            reason=log.reason,
+        )
+        for log in logs
+    ]
+
+    return APIResponse(
+        success=True,
+        data=TokenAuditLogsResponse(
+            token_id=str(token_id),
+            token_name=token.name,
+            total_logs=len(log_entries),
+            logs=log_entries,
+        ),
+    )
