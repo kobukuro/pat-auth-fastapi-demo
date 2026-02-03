@@ -113,3 +113,38 @@ def delete_workspace(
             your_scopes=auth.scopes,
         ),
     )
+
+
+@router.put(
+    "/{id}/settings",
+    response_model=APIResponse[WorkspacesStubResponseData],
+    status_code=status.HTTP_200_OK,
+)
+def update_workspace_settings(
+    id: str,
+    auth: AuthContext = Depends(require_scope("workspaces:admin")),
+):
+    """
+    Stub endpoint for updating workspace settings.
+
+    This endpoint requires workspaces:admin scope (the highest level) and returns
+    metadata about the endpoint and permission check, rather than actual settings data.
+    It demonstrates the scope-based authorization system for admin operations.
+
+    Args:
+        id: The workspace ID to update settings for
+        auth: AuthContext containing PAT, scopes, and permission info
+
+    Returns:
+        APIResponse with WorkspacesStubResponseData containing endpoint metadata
+    """
+    return APIResponse(
+        success=True,
+        data=WorkspacesStubResponseData(
+            endpoint=f"/api/v1/workspaces/{id}/settings",
+            method="PUT",
+            required_scope=auth.required_scope,
+            granted_by=auth.granted_by,
+            your_scopes=auth.scopes,
+        ),
+    )
