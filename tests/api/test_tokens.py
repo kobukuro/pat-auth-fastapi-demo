@@ -13,11 +13,11 @@ def _get_jwt(client) -> str:
     """Helper to register and login, returning JWT token."""
     client.post(
         URLs.REGISTER,
-        json={"username": "tokenuser", "password": "password123"},
+        json={"email": "token@example.com", "password": "password123"},
     )
     response = client.post(
         URLs.LOGIN,
-        json={"username": "tokenuser", "password": "password123"},
+        json={"email": "token@example.com", "password": "password123"},
     )
     return response.json()["data"]["access_token"]
 
@@ -245,11 +245,11 @@ def test_list_tokens_isolation(client):
     # Create second user and token
     client.post(
         URLs.REGISTER,
-        json={"username": "user2", "password": "password123"},
+        json={"email": "user2@example.com", "password": "password123"},
     )
     login_response = client.post(
         URLs.LOGIN,
-        json={"username": "user2", "password": "password123"},
+        json={"email": "user2@example.com", "password": "password123"},
     )
     jwt2 = login_response.json()["data"]["access_token"]
 
@@ -429,11 +429,11 @@ def test_get_token_other_user_token(client):
     # Create second user
     client.post(
         URLs.REGISTER,
-        json={"username": "user2", "password": "password123"},
+        json={"email": "user2@example.com", "password": "password123"},
     )
     login_response = client.post(
         URLs.LOGIN,
-        json={"username": "user2", "password": "password123"},
+        json={"email": "user2@example.com", "password": "password123"},
     )
     jwt2 = login_response.json()["data"]["access_token"]
 
@@ -566,11 +566,11 @@ def test_revoke_token_other_user_token(client):
     # Create second user
     client.post(
         URLs.REGISTER,
-        json={"username": "user2", "password": "password123"},
+        json={"email": "user2@example.com", "password": "password123"},
     )
     login_response = client.post(
         URLs.LOGIN,
-        json={"username": "user2", "password": "password123"},
+        json={"email": "user2@example.com", "password": "password123"},
     )
     jwt2 = login_response.json()["data"]["access_token"]
 
@@ -758,11 +758,11 @@ def test_get_token_logs_other_user_token(client):
     # Create second user
     client.post(
         URLs.REGISTER,
-        json={"username": "user2", "password": "password123"},
+        json={"email": "user2@example.com", "password": "password123"},
     )
     login_response = client.post(
         URLs.LOGIN,
-        json={"username": "user2", "password": "password123"},
+        json={"email": "user2@example.com", "password": "password123"},
     )
     jwt2 = login_response.json()["data"]["access_token"]
 

@@ -19,18 +19,21 @@ router = APIRouter(prefix="/auth", tags=["auth"])
     status_code=status.HTTP_201_CREATED,
 )
 def register(request: UserRegisterRequest, db: Session = Depends(get_db)):
-    # Check if username already exists
-    stmt = select(User).where(User.username == request.username)
+    # Normalize email to lowercase
+    email = request.email.lower()
+
+    # Check if email already exists
+    stmt = select(User).where(User.email == email)
     existing_user = db.execute(stmt).scalar_one_or_none()
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"success": False, "error": "Bad Request", "message": "Username already exists"},
+            detail={"success": False, "error": "Bad Request", "message": "Email already exists"},
         )
 
     # Create new user
     user = User(
-        username=request.username,
+        email=email,
         hashed_password=hash_password(request.password),
     )
 
@@ -42,7 +45,7 @@ def register(request: UserRegisterRequest, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"success": False, "error": "Bad Request", "message": "Username already exists"},
+            detail={"success": False, "error": "Bad Request", "message": "Email already exists"},
         )
 
     return APIResponse(success=True, data=UserResponse.model_validate(user))
@@ -50,8 +53,11 @@ def register(request: UserRegisterRequest, db: Session = Depends(get_db)):
 
 @router.post("/login", response_model=APIResponse[TokenResponse])
 def login(request: UserLoginRequest, db: Session = Depends(get_db)):
+    # Normalize email to lowercase
+    email = request.email.lower()
+
     # Find user
-    stmt = select(User).where(User.username == request.username)
+    stmt = select(User).where(User.email == email)
     user = db.execute(stmt).scalar_one_or_none()
 
     # Verify password
