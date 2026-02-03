@@ -8,3 +8,4 @@ class URLs:
     USERS_ME = "/api/v1/users/me"
     FCS_PARAMETERS = "/api/v1/fcs/parameters"
     FCS_PARAMETERS_WITH_ID = "/api/v1/fcs/parameters?file_id={}"
+    FCS_EVENTS = "/api/v1/fcs/events"
