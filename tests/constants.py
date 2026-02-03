@@ -5,3 +5,4 @@ class URLs:
     WORKSPACES = "/api/v1/workspaces"
     WORKSPACES_DELETE = "/api/v1/workspaces/{}"
     WORKSPACES_SETTINGS = "/api/v1/workspaces/{}/settings"
+    USERS_ME = "/api/v1/users/me"
