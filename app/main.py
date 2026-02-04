@@ -4,9 +4,13 @@ from fastapi.responses import JSONResponse
 from app.api.v1.router import router as v1_router
 from app.logging_config import setup_logging
 from app.middleware.audit import audit_pat_middleware
+from app.middleware.rate_limit import rate_limit_middleware
 
 app = FastAPI(title="PAT Auth API")
 
+# Rate limit must run FIRST
+app.middleware("http")(rate_limit_middleware)
+# Then audit middleware
 app.middleware("http")(audit_pat_middleware)
 
 app.include_router(v1_router, prefix="/api/v1")
