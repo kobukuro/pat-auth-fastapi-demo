@@ -1,11 +1,23 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+
+from app.utils.validators import PasswordValidationError, validate_password_complexity
 
 
 class UserRegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
+
+    @field_validator('password')
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        """Validate password complexity"""
+        try:
+            validate_password_complexity(v)
+        except PasswordValidationError as e:
+            raise ValueError('; '.join(e.errors))
+        return v
 
 
 class UserResponse(BaseModel):

@@ -21,11 +21,11 @@ def _get_jwt(client) -> str:
     """Helper to register and login, returning JWT token."""
     client.post(
         URLs.REGISTER,
-        json={"email": "fcs@example.com", "password": "password123"},
+        json={"email": "fcs@example.com", "password": "Password123!"},
     )
     response = client.post(
         URLs.LOGIN,
-        json={"email": "fcs@example.com", "password": "password123"},
+        json={"email": "fcs@example.com", "password": "Password123!"},
     )
     return response.json()["data"]["access_token"]
 
