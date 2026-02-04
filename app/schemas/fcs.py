@@ -2,11 +2,11 @@
 FCS API schemas.
 
 This module defines Pydantic schemas for FCS-related API responses,
-including parameters data and file upload responses.
+including parameters data, events, file upload, and statistics.
 """
 from typing import Dict, List, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class FCSParameter(BaseModel):
@@ -121,7 +121,113 @@ class FCSEventsResponseData(BaseModel):
     }
 
 
-# Reserved for future implementation: File upload schemas
+# File upload schemas
+
+
+class FCSFileResponse(BaseModel):
+    """FCS file upload response schema."""
+
+    file_id: str
+    """Unique file identifier (short base62 string)."""
+
+    filename: str
+    """Original filename."""
+
+    file_size: int
+    """File size in bytes."""
+
+    total_events: int
+    """Total number of events in the FCS file."""
+
+    total_parameters: int
+    """Total number of parameters."""
+
+
+# Statistics schemas
+
+
+class FCSStatisticItem(BaseModel):
+    """Single statistic item for one parameter."""
+
+    parameter: str
+    """Parameter name."""
+
+    pns: str
+    """Parameter stain name."""
+
+    display: str
+    """Display type (LIN or LOG)."""
+
+    min: float
+    """Minimum value."""
+
+    max: float
+    """Maximum value."""
+
+    mean: float
+    """Mean (average) value."""
+
+    median: float
+    """Median value."""
+
+    std: float
+    """Standard deviation."""
+
+
+class FCSStatisticsResponseData(BaseModel):
+    """Statistics endpoint response data."""
+
+    total_events: int
+    """Total number of events."""
+
+    statistics: List[FCSStatisticItem]
+    """List of statistics for each parameter."""
+
+
+# Background task schemas
+
+
+class StatisticsCalculateRequest(BaseModel):
+    """Request to trigger statistics calculation."""
+
+    file_id: str | None = Field(
+        None, description="Optional file ID. If not provided, uses sample file."
+    )
+
+
+class TaskResponseData(BaseModel):
+    """Task status response data."""
+
+    task_id: int
+    """Task ID (auto-increment integer)."""
+
+    status: str
+    """Task status (pending, processing, completed, failed)."""
+
+    created_at: str
+    """Task creation timestamp (ISO format)."""
+
+    completed_at: str | None = None
+    """Task completion timestamp (ISO format)."""
+
+    result: Dict | None = None
+    """Task result data (statistics or error)."""
+
+
+class TaskCreatedResponseData(BaseModel):
+    """Response when background task is created."""
+
+    task_id: int
+    """Task ID (auto-increment integer)."""
+
+    status: str
+    """Task status."""
+
+    message: str
+    """Human-readable message."""
+
+
+# Reserved for future implementation
 
 
 class FCSFileCreate(BaseModel):
@@ -129,22 +235,3 @@ class FCSFileCreate(BaseModel):
 
     is_public: bool = True
     """Whether the file should be publicly accessible."""
-
-
-class FCSFileResponse(BaseModel):
-    """FCS file response schema (reserved for future use)."""
-
-    file_id: str
-    """Unique file identifier."""
-
-    filename: str
-    """Original filename."""
-
-    total_events: int
-    """Total number of events."""
-
-    total_parameters: int
-    """Total number of parameters."""
-
-    upload_duration_ms: int | None
-    """Upload duration in milliseconds."""

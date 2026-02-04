@@ -9,3 +9,8 @@ class URLs:
     FCS_PARAMETERS = "/api/v1/fcs/parameters"
     FCS_PARAMETERS_WITH_ID = "/api/v1/fcs/parameters?file_id={}"
     FCS_EVENTS = "/api/v1/fcs/events"
+    FCS_UPLOAD = "/api/v1/fcs/upload"
+    FCS_STATISTICS = "/api/v1/fcs/statistics"
+    FCS_STATISTICS_CALCULATE = "/api/v1/fcs/statistics/calculate"
+    FCS_TASKS = "/api/v1/fcs/tasks/{}"
+    FCS_TASKS_WITH_ID = "/api/v1/fcs/tasks/{}"
