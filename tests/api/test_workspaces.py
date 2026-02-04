@@ -161,7 +161,7 @@ def test_workspaces_forbidden_missing_scope(client):
     )
 
     assert response.status_code == 403
-    data = response.json()["detail"]
+    data = response.json()
     assert data["success"] is False
     assert data["error"] == "Forbidden"
     assert data["data"]["required_scope"] == "workspaces:read"
@@ -179,7 +179,7 @@ def test_workspaces_forbidden_different_resource(client):
     )
 
     assert response.status_code == 403
-    data = response.json()["detail"]
+    data = response.json()
     assert data["data"]["required_scope"] == "workspaces:read"
 
 
@@ -202,9 +202,9 @@ def test_workspaces_unauthorized_invalid_token(client):
 
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["success"] is False
-    assert data["detail"]["error"] == "Unauthorized"
-    assert data["detail"]["message"] == "Invalid token"
+    assert data["success"] is False
+    assert data["error"] == "Unauthorized"
+    assert data["message"] == "Invalid token"
 
 
 def test_workspaces_unauthorized_revoked_token(client, db):
@@ -227,8 +227,8 @@ def test_workspaces_unauthorized_revoked_token(client, db):
 
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["success"] is False
-    assert data["detail"]["message"] == "Token revoked"
+    assert data["success"] is False
+    assert data["message"] == "Token revoked"
 
 
 def test_workspaces_unauthorized_expired_token(client, db):
@@ -254,8 +254,8 @@ def test_workspaces_unauthorized_expired_token(client, db):
 
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["success"] is False
-    assert data["detail"]["message"] == "Token expired"
+    assert data["success"] is False
+    assert data["message"] == "Token expired"
 
 
 def test_workspaces_unauthorized_jwt_instead_of_pat(client):
@@ -270,8 +270,8 @@ def test_workspaces_unauthorized_jwt_instead_of_pat(client):
     # JWT doesn't start with "pat_", so should be treated as invalid PAT
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["success"] is False
-    assert data["detail"]["message"] == "Invalid token"
+    assert data["success"] is False
+    assert data["message"] == "Invalid token"
 
 
 def test_workspaces_unauthorized_non_pat_token(client):
@@ -283,7 +283,7 @@ def test_workspaces_unauthorized_non_pat_token(client):
 
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["message"] == "Invalid token"
+    assert data["message"] == "Invalid token"
 
 
 # Scope Hierarchy Tests
@@ -495,7 +495,7 @@ def test_workspaces_post_forbidden_read_scope_only(client):
     )
 
     assert response.status_code == 403
-    data = response.json()["detail"]
+    data = response.json()
     assert data["success"] is False
     assert data["error"] == "Forbidden"
     assert data["data"]["required_scope"] == "workspaces:write"
@@ -513,7 +513,7 @@ def test_workspaces_post_forbidden_missing_scope(client):
     )
 
     assert response.status_code == 403
-    data = response.json()["detail"]
+    data = response.json()
     assert data["success"] is False
     assert data["error"] == "Forbidden"
     assert data["data"]["required_scope"] == "workspaces:write"
@@ -531,7 +531,7 @@ def test_workspaces_post_forbidden_different_resource(client):
     )
 
     assert response.status_code == 403
-    data = response.json()["detail"]
+    data = response.json()
     assert data["data"]["required_scope"] == "workspaces:write"
 
 
@@ -551,9 +551,9 @@ def test_workspaces_post_unauthorized_invalid_token(client):
 
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["success"] is False
-    assert data["detail"]["error"] == "Unauthorized"
-    assert data["detail"]["message"] == "Invalid token"
+    assert data["success"] is False
+    assert data["error"] == "Unauthorized"
+    assert data["message"] == "Invalid token"
 
 
 def test_workspaces_post_unauthorized_revoked_token(client, db):
@@ -576,8 +576,8 @@ def test_workspaces_post_unauthorized_revoked_token(client, db):
 
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["success"] is False
-    assert data["detail"]["message"] == "Token revoked"
+    assert data["success"] is False
+    assert data["message"] == "Token revoked"
 
 
 def test_workspaces_post_unauthorized_expired_token(client, db):
@@ -603,8 +603,8 @@ def test_workspaces_post_unauthorized_expired_token(client, db):
 
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["success"] is False
-    assert data["detail"]["message"] == "Token expired"
+    assert data["success"] is False
+    assert data["message"] == "Token expired"
 
 
 def test_workspaces_post_scope_hierarchy_admin_grants_write(client, db):
@@ -744,7 +744,7 @@ def test_workspaces_delete_forbidden_read_scope_only(client):
     )
 
     assert response.status_code == 403
-    data = response.json()["detail"]
+    data = response.json()
     assert data["success"] is False
     assert data["error"] == "Forbidden"
     assert data["data"]["required_scope"] == "workspaces:delete"
@@ -762,7 +762,7 @@ def test_workspaces_delete_forbidden_write_scope_only(client):
     )
 
     assert response.status_code == 403
-    data = response.json()["detail"]
+    data = response.json()
     assert data["success"] is False
     assert data["error"] == "Forbidden"
     assert data["data"]["required_scope"] == "workspaces:delete"
@@ -780,7 +780,7 @@ def test_workspaces_delete_forbidden_missing_scope(client):
     )
 
     assert response.status_code == 403
-    data = response.json()["detail"]
+    data = response.json()
     assert data["success"] is False
     assert data["error"] == "Forbidden"
     assert data["data"]["required_scope"] == "workspaces:delete"
@@ -798,7 +798,7 @@ def test_workspaces_delete_forbidden_different_resource(client):
     )
 
     assert response.status_code == 403
-    data = response.json()["detail"]
+    data = response.json()
     assert data["data"]["required_scope"] == "workspaces:delete"
 
 
@@ -818,9 +818,9 @@ def test_workspaces_delete_unauthorized_invalid_token(client):
 
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["success"] is False
-    assert data["detail"]["error"] == "Unauthorized"
-    assert data["detail"]["message"] == "Invalid token"
+    assert data["success"] is False
+    assert data["error"] == "Unauthorized"
+    assert data["message"] == "Invalid token"
 
 
 def test_workspaces_delete_unauthorized_revoked_token(client, db):
@@ -843,8 +843,8 @@ def test_workspaces_delete_unauthorized_revoked_token(client, db):
 
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["success"] is False
-    assert data["detail"]["message"] == "Token revoked"
+    assert data["success"] is False
+    assert data["message"] == "Token revoked"
 
 
 def test_workspaces_delete_unauthorized_expired_token(client, db):
@@ -870,8 +870,8 @@ def test_workspaces_delete_unauthorized_expired_token(client, db):
 
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["success"] is False
-    assert data["detail"]["message"] == "Token expired"
+    assert data["success"] is False
+    assert data["message"] == "Token expired"
 
 
 def test_workspaces_delete_scope_hierarchy_admin_grants_delete(client, db):
@@ -998,7 +998,7 @@ def test_workspaces_settings_forbidden_read_scope_only(client):
     )
 
     assert response.status_code == 403
-    data = response.json()["detail"]
+    data = response.json()
     assert data["success"] is False
     assert data["error"] == "Forbidden"
     assert data["data"]["required_scope"] == "workspaces:admin"
@@ -1016,7 +1016,7 @@ def test_workspaces_settings_forbidden_write_scope_only(client):
     )
 
     assert response.status_code == 403
-    data = response.json()["detail"]
+    data = response.json()
     assert data["success"] is False
     assert data["error"] == "Forbidden"
     assert data["data"]["required_scope"] == "workspaces:admin"
@@ -1034,7 +1034,7 @@ def test_workspaces_settings_forbidden_delete_scope_only(client):
     )
 
     assert response.status_code == 403
-    data = response.json()["detail"]
+    data = response.json()
     assert data["success"] is False
     assert data["error"] == "Forbidden"
     assert data["data"]["required_scope"] == "workspaces:admin"
@@ -1052,7 +1052,7 @@ def test_workspaces_settings_forbidden_missing_scope(client):
     )
 
     assert response.status_code == 403
-    data = response.json()["detail"]
+    data = response.json()
     assert data["success"] is False
     assert data["error"] == "Forbidden"
     assert data["data"]["required_scope"] == "workspaces:admin"
@@ -1070,7 +1070,7 @@ def test_workspaces_settings_forbidden_different_resource(client):
     )
 
     assert response.status_code == 403
-    data = response.json()["detail"]
+    data = response.json()
     assert data["data"]["required_scope"] == "workspaces:admin"
 
 
@@ -1090,9 +1090,9 @@ def test_workspaces_settings_unauthorized_invalid_token(client):
 
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["success"] is False
-    assert data["detail"]["error"] == "Unauthorized"
-    assert data["detail"]["message"] == "Invalid token"
+    assert data["success"] is False
+    assert data["error"] == "Unauthorized"
+    assert data["message"] == "Invalid token"
 
 
 def test_workspaces_settings_unauthorized_revoked_token(client, db):
@@ -1115,8 +1115,8 @@ def test_workspaces_settings_unauthorized_revoked_token(client, db):
 
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["success"] is False
-    assert data["detail"]["message"] == "Token revoked"
+    assert data["success"] is False
+    assert data["message"] == "Token revoked"
 
 
 def test_workspaces_settings_unauthorized_expired_token(client, db):
@@ -1142,8 +1142,8 @@ def test_workspaces_settings_unauthorized_expired_token(client, db):
 
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["success"] is False
-    assert data["detail"]["message"] == "Token expired"
+    assert data["success"] is False
+    assert data["message"] == "Token expired"
 
 
 def test_workspaces_settings_unauthorized_jwt_instead_of_pat(client):
@@ -1158,8 +1158,8 @@ def test_workspaces_settings_unauthorized_jwt_instead_of_pat(client):
     # JWT doesn't start with "pat_", so should be treated as invalid PAT
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["success"] is False
-    assert data["detail"]["message"] == "Invalid token"
+    assert data["success"] is False
+    assert data["message"] == "Invalid token"
 
 
 def test_workspaces_settings_unauthorized_non_pat_token(client):
@@ -1171,7 +1171,7 @@ def test_workspaces_settings_unauthorized_non_pat_token(client):
 
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["message"] == "Invalid token"
+    assert data["message"] == "Invalid token"
 
 
 def test_workspaces_settings_no_cross_resource(db):

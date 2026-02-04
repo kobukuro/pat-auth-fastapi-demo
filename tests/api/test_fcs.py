@@ -158,7 +158,7 @@ def test_fcs_parameters_forbidden_without_fcs_scope(client):
     )
 
     assert response.status_code == 403
-    data = response.json()["detail"]
+    data = response.json()
     assert data["success"] is False
     assert data["error"] == "Forbidden"
     assert data["data"]["required_scope"] == "fcs:read"
@@ -209,9 +209,9 @@ def test_fcs_parameters_unauthorized_invalid_token(client):
 
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["success"] is False
-    assert data["detail"]["error"] == "Unauthorized"
-    assert data["detail"]["message"] == "Invalid token"
+    assert data["success"] is False
+    assert data["error"] == "Unauthorized"
+    assert data["message"] == "Invalid token"
 
 
 def test_fcs_parameters_unauthorized_jwt_instead_of_pat(client):
@@ -236,7 +236,7 @@ def test_fcs_parameters_unauthorized_non_pat_token(client):
 
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["message"] == "Invalid token"
+    assert data["message"] == "Invalid token"
 
 
 # Scope Hierarchy Tests
@@ -331,8 +331,8 @@ def test_fcs_parameters_unauthorized_revoked_token(client, db):
 
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["success"] is False
-    assert data["detail"]["message"] == "Token revoked"
+    assert data["success"] is False
+    assert data["message"] == "Token revoked"
 
 
 def test_fcs_parameters_unauthorized_expired_token(client, db):
@@ -358,8 +358,8 @@ def test_fcs_parameters_unauthorized_expired_token(client, db):
 
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["success"] is False
-    assert data["detail"]["message"] == "Token expired"
+    assert data["success"] is False
+    assert data["message"] == "Token expired"
 
 
 # ========================================
@@ -508,7 +508,7 @@ def test_fcs_events_forbidden_without_fcs_scope(client):
     )
 
     assert response.status_code == 403
-    data = response.json()["detail"]
+    data = response.json()
     assert data["success"] is False
     assert data["error"] == "Forbidden"
     assert data["data"]["required_scope"] == "fcs:read"
@@ -680,7 +680,7 @@ def test_fcs_upload_rejects_non_fcs_file(client):
     )
 
     assert response.status_code == 400
-    data = response.json()["detail"]
+    data = response.json()
     assert data["success"] is False
     assert "Invalid file type" in data["message"]
 
@@ -702,7 +702,7 @@ def test_fcs_statistics_returns_404_when_not_calculated(client):
     )
 
     assert response.status_code == 404
-    data = response.json()["detail"]
+    data = response.json()
     assert data["success"] is False
     assert "calculate" in data["message"]
 

@@ -129,7 +129,7 @@ def test_users_me_forbidden_missing_scope(client):
     )
 
     assert response.status_code == 403
-    data = response.json()["detail"]
+    data = response.json()
     assert data["success"] is False
     assert data["error"] == "Forbidden"
     assert data["data"]["required_scope"] == "users:read"
@@ -147,7 +147,7 @@ def test_users_me_forbidden_different_resource(client):
     )
 
     assert response.status_code == 403
-    data = response.json()["detail"]
+    data = response.json()
     assert data["data"]["required_scope"] == "users:read"
 
 
@@ -170,9 +170,9 @@ def test_users_me_unauthorized_invalid_token(client):
 
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["success"] is False
-    assert data["detail"]["error"] == "Unauthorized"
-    assert data["detail"]["message"] == "Invalid token"
+    assert data["success"] is False
+    assert data["error"] == "Unauthorized"
+    assert data["message"] == "Invalid token"
 
 
 def test_users_me_unauthorized_revoked_token(client, db):
@@ -195,8 +195,8 @@ def test_users_me_unauthorized_revoked_token(client, db):
 
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["success"] is False
-    assert data["detail"]["message"] == "Token revoked"
+    assert data["success"] is False
+    assert data["message"] == "Token revoked"
 
 
 def test_users_me_unauthorized_expired_token(client, db):
@@ -222,8 +222,8 @@ def test_users_me_unauthorized_expired_token(client, db):
 
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["success"] is False
-    assert data["detail"]["message"] == "Token expired"
+    assert data["success"] is False
+    assert data["message"] == "Token expired"
 
 
 def test_users_me_unauthorized_jwt_instead_of_pat(client):
@@ -238,8 +238,8 @@ def test_users_me_unauthorized_jwt_instead_of_pat(client):
     # JWT doesn't start with "pat_", so should be treated as invalid PAT
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["success"] is False
-    assert data["detail"]["message"] == "Invalid token"
+    assert data["success"] is False
+    assert data["message"] == "Invalid token"
 
 
 def test_users_me_unauthorized_non_pat_token(client):
@@ -251,7 +251,7 @@ def test_users_me_unauthorized_non_pat_token(client):
 
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["message"] == "Invalid token"
+    assert data["message"] == "Invalid token"
 
 
 # Scope Hierarchy Tests
@@ -424,7 +424,7 @@ def test_users_me_put_forbidden_read_scope_only(client):
     )
 
     assert response.status_code == 403
-    data = response.json()["detail"]
+    data = response.json()
     assert data["success"] is False
     assert data["error"] == "Forbidden"
     assert data["data"]["required_scope"] == "users:write"
@@ -442,7 +442,7 @@ def test_users_me_put_forbidden_missing_scope(client):
     )
 
     assert response.status_code == 403
-    data = response.json()["detail"]
+    data = response.json()
     assert data["success"] is False
     assert data["error"] == "Forbidden"
     assert data["data"]["required_scope"] == "users:write"
@@ -460,7 +460,7 @@ def test_users_me_put_forbidden_different_resource(client):
     )
 
     assert response.status_code == 403
-    data = response.json()["detail"]
+    data = response.json()
     assert data["success"] is False
     assert data["data"]["required_scope"] == "users:write"
 
@@ -484,9 +484,9 @@ def test_users_me_put_unauthorized_invalid_token(client):
 
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["success"] is False
-    assert data["detail"]["error"] == "Unauthorized"
-    assert data["detail"]["message"] == "Invalid token"
+    assert data["success"] is False
+    assert data["error"] == "Unauthorized"
+    assert data["message"] == "Invalid token"
 
 
 def test_users_me_put_unauthorized_revoked_token(client, db):
@@ -509,8 +509,8 @@ def test_users_me_put_unauthorized_revoked_token(client, db):
 
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["success"] is False
-    assert data["detail"]["message"] == "Token revoked"
+    assert data["success"] is False
+    assert data["message"] == "Token revoked"
 
 
 def test_users_me_put_unauthorized_expired_token(client, db):
@@ -536,8 +536,8 @@ def test_users_me_put_unauthorized_expired_token(client, db):
 
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["success"] is False
-    assert data["detail"]["message"] == "Token expired"
+    assert data["success"] is False
+    assert data["message"] == "Token expired"
 
 
 def test_users_me_put_unauthorized_jwt_instead_of_pat(client):
@@ -552,8 +552,8 @@ def test_users_me_put_unauthorized_jwt_instead_of_pat(client):
     # JWT doesn't start with "pat_", so should be treated as invalid PAT
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["success"] is False
-    assert data["detail"]["message"] == "Invalid token"
+    assert data["success"] is False
+    assert data["message"] == "Invalid token"
 
 
 def test_users_me_put_unauthorized_non_pat_token(client):
@@ -565,7 +565,7 @@ def test_users_me_put_unauthorized_non_pat_token(client):
 
     assert response.status_code == 401
     data = response.json()
-    assert data["detail"]["message"] == "Invalid token"
+    assert data["message"] == "Invalid token"
 
 
 # Scope Hierarchy Tests for PUT /me
