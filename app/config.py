@@ -20,6 +20,11 @@ class Settings(BaseSettings):
         "application/fcs",
     ]
 
+    # Rate limiting settings
+    RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_MAX_REQUESTS: int = 60
+    RATE_LIMIT_WINDOW_SECONDS: int = 60
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

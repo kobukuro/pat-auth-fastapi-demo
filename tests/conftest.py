@@ -125,3 +125,12 @@ def client(db):
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limiter():
+    """Reset the rate limiter before each test to avoid interference."""
+    from app.middleware.rate_limit import rate_limiter
+    rate_limiter._requests.clear()
+    rate_limiter._locks.clear()
+    yield
