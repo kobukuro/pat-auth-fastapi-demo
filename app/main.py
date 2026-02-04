@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 
 from app.api.v1.router import router as v1_router
@@ -17,6 +17,27 @@ app.include_router(v1_router, prefix="/api/v1")
 
 # Setup application logging
 logger = setup_logging()
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Unwrap the 'detail' field from HTTPException responses."""
+    content = exc.detail
+
+    if isinstance(content, dict):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=content
+        )
+
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "success": False,
+            "error": "Error",
+            "message": content
+        }
+    )
 
 
 @app.exception_handler(Exception)

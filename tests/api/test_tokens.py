@@ -388,10 +388,8 @@ def test_get_token_not_found(client):
 
     assert response.status_code == 404
     data = response.json()
-    # FastAPI wraps the detail in a "detail" key
-    assert "detail" in data
-    assert data["detail"]["success"] is False
-    assert data["detail"]["error"] == "Not Found"
+    assert data["success"] is False
+    assert data["error"] == "Not Found"
 
 
 def test_get_token_without_jwt(client):
@@ -446,10 +444,8 @@ def test_get_token_other_user_token(client):
     # Should return 404 (not 403) for security
     assert response.status_code == 404
     data = response.json()
-    # FastAPI wraps the detail in a "detail" key
-    assert "detail" in data
-    assert data["detail"]["success"] is False
-    assert data["detail"]["error"] == "Not Found"
+    assert data["success"] is False
+    assert data["error"] == "Not Found"
 
 
 def test_get_token_no_sensitive_data(client):
@@ -526,9 +522,8 @@ def test_revoke_token_not_found(client):
 
     assert response.status_code == 404
     data = response.json()
-    assert "detail" in data
-    assert data["detail"]["success"] is False
-    assert data["detail"]["error"] == "Not Found"
+    assert data["success"] is False
+    assert data["error"] == "Not Found"
 
 
 def test_revoke_token_without_jwt(client):
@@ -583,8 +578,7 @@ def test_revoke_token_other_user_token(client):
     # Should return 404 (not 403) for security
     assert response.status_code == 404
     data = response.json()
-    assert "detail" in data
-    assert data["detail"]["success"] is False
+    assert data["success"] is False
 
 
 def test_revoke_token_idempotent(client):
@@ -718,9 +712,8 @@ def test_get_token_logs_not_found(client):
 
     assert response.status_code == 404
     data = response.json()
-    assert "detail" in data
-    assert data["detail"]["success"] is False
-    assert data["detail"]["error"] == "Not Found"
+    assert data["success"] is False
+    assert data["error"] == "Not Found"
 
 
 def test_get_token_logs_without_jwt(client):
@@ -775,8 +768,7 @@ def test_get_token_logs_other_user_token(client):
     # Should return 404 (not 403) for security
     assert response.status_code == 404
     data = response.json()
-    assert "detail" in data
-    assert data["detail"]["success"] is False
+    assert data["success"] is False
 
 
 def test_get_token_logs_empty(client):
