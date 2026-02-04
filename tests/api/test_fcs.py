@@ -607,17 +607,210 @@ def test_fcs_events_negative_offset(client):
     assert response.status_code == 422
 
 
-# Reserved tests for future file upload functionality
-# These will be implemented when POST /api/v1/fcs/upload is added
+# ========================================
+# FCS Upload Endpoint Tests
+# ========================================
 
-# def test_fcs_parameters_uploaded_public_file(client):
-#     """Test accessing a public uploaded file."""
-#     pass
 
-# def test_fcs_parameters_uploaded_private_file_owner(client):
-#     """Test file owner accessing their private file."""
-#     pass
+def test_fcs_upload_success_with_valid_fcs_file(client):
+    """Test successful FCS file upload with fcs:write scope."""
+    import os
 
-# def test_fcs_parameters_uploaded_private_file_forbidden(client):
-#     """Test non-owner cannot access private file."""
-#     pass
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:write"])
+
+    # Read sample FCS file
+    sample_fcs_path = "app/data/sample.fcs"
+    with open(sample_fcs_path, "rb") as f:
+        files = {"file": ("sample.fcs", f, "application/octet-stream")}
+        data = {"is_public": True}
+
+        response = client.post(
+            URLs.FCS_UPLOAD,
+            headers={"Authorization": f"Bearer {pat}"},
+            files=files,
+            data=data,
+        )
+
+    assert response.status_code == 201
+    resp = response.json()
+    assert resp["success"] is True
+    data = resp["data"]
+    assert "file_id" in data
+    assert data["filename"] == "sample.fcs"
+    assert data["total_events"] == 34297
+    assert data["total_parameters"] == 26
+    assert data["file_size"] > 0
+
+
+def test_fcs_upload_forbidden_without_fcs_write_scope(client):
+    """Test 403 when trying to upload without fcs:write scope."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:read"])
+
+    sample_fcs_path = "app/data/sample.fcs"
+    with open(sample_fcs_path, "rb") as f:
+        files = {"file": ("sample.fcs", f, "application/octet-stream")}
+        data = {"is_public": True}
+
+        response = client.post(
+            URLs.FCS_UPLOAD,
+            headers={"Authorization": f"Bearer {pat}"},
+            files=files,
+            data=data,
+        )
+
+    assert response.status_code == 403
+
+
+def test_fcs_upload_rejects_non_fcs_file(client):
+    """Test 400 when uploading non-.fcs file."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:write"])
+
+    # Create a fake file with wrong extension
+    files = {"file": ("test.txt", b"fake content", "text/plain")}
+    data = {"is_public": True}
+
+    response = client.post(
+        URLs.FCS_UPLOAD,
+        headers={"Authorization": f"Bearer {pat}"},
+        files=files,
+        data=data,
+    )
+
+    assert response.status_code == 400
+    data = response.json()["detail"]
+    assert data["success"] is False
+    assert "Invalid file type" in data["message"]
+
+
+# ========================================
+# FCS Statistics Endpoint Tests
+# ========================================
+
+
+def test_fcs_statistics_returns_404_when_not_calculated(client):
+    """Test GET /statistics returns 404 when statistics not calculated yet."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:analyze"])
+
+    # Sample file statistics haven't been calculated yet
+    response = client.get(
+        URLs.FCS_STATISTICS,
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 404
+    data = response.json()["detail"]
+    assert data["success"] is False
+    assert "calculate" in data["message"]
+
+
+def test_fcs_statistics_calculate_triggers_background_task(client):
+    """Test POST /statistics/calculate triggers background task."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:analyze"])
+
+    response = client.post(
+        URLs.FCS_STATISTICS_CALCULATE,
+        headers={"Authorization": f"Bearer {pat}"},
+        json={},  # Empty body = sample file
+    )
+
+    assert response.status_code == 202
+    resp = response.json()
+    assert resp["success"] is True
+    data = response.json()["data"]
+    assert "task_id" in data
+    assert data["status"] == "pending"
+    assert isinstance(data["task_id"], int)
+
+
+def test_fcs_statistics_calculate_returns_cached_if_exists(client, db):
+    """Test POST /statistics/calculate returns cached results if already calculated."""
+    from app.models.background_task import BackgroundTask
+    from app.models.fcs_statistics import FCSStatistics
+    from app.services.fcs_statistics import calculate_fcs_statistics
+
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:analyze"])
+
+    # First, calculate statistics to populate cache
+    sample_fcs_path = "app/data/sample.fcs"
+    result = calculate_fcs_statistics(sample_fcs_path)
+
+    # Manually populate cache
+    stats_record = FCSStatistics(
+        file_id="sample",
+        fcs_file_id=None,
+        statistics=result.statistics,
+        total_events=result.total_events,
+    )
+    db.add(stats_record)
+    db.commit()
+
+    # Now call calculate API - should return cached results
+    response = client.post(
+        URLs.FCS_STATISTICS_CALCULATE,
+        headers={"Authorization": f"Bearer {pat}"},
+        json={},
+    )
+
+    assert response.status_code == 202
+    resp = response.json()
+    assert resp["success"] is True
+    data = response.json()["data"]
+    assert data["status"] == "completed"
+    assert data["result"]["total_events"] == 34297
+    assert len(data["result"]["statistics"]) == 26
+
+    # Clean up
+    db.delete(stats_record)
+    db.commit()
+
+
+# ========================================
+# Task Status Endpoint Tests
+# ========================================
+
+
+def test_fcs_task_status_returns_404_for_invalid_task(client):
+    """Test GET /tasks/{id} returns 404 for non-existent task."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:analyze"])
+
+    response = client.get(
+        f"{URLs.FCS_TASKS}/999",
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 404
+
+
+# ========================================
+# Scope Hierarchy for Statistics
+# ========================================
+
+
+def test_fcs_statistics_requires_analyze_scope(client, db):
+    """Test that fcs:analyze scope is required (not just read)."""
+    from app.services.pat import has_permission
+
+    # fcs:read should NOT grant fcs:analyze access
+    assert has_permission(db, ["fcs:read"], "fcs:analyze") is False
+
+
+def test_fcs_analyze_grants_statistics_access(client):
+    """Test that fcs:analyze grants access to statistics endpoints."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:analyze"])
+
+    # Should be able to trigger calculation
+    response = client.post(
+        URLs.FCS_STATISTICS_CALCULATE,
+        headers={"Authorization": f"Bearer {pat}"},
+        json={},
+    )
+
+    assert response.status_code == 202
