@@ -201,8 +201,11 @@ class TaskResponseData(BaseModel):
     task_id: int
     """Task ID (auto-increment integer)."""
 
+    task_type: str
+    """Task type (statistics or chunked_upload)."""
+
     status: str
-    """Task status (pending, processing, completed, failed)."""
+    """Task status (pending, processing, finalizing, completed, failed, expired)."""
 
     created_at: str
     """Task creation timestamp (ISO format)."""
@@ -211,7 +214,7 @@ class TaskResponseData(BaseModel):
     """Task completion timestamp (ISO format)."""
 
     result: Dict | None = None
-    """Task result data (statistics or error)."""
+    """Task result data (statistics, upload progress, or error)."""
 
 
 class TaskCreatedResponseData(BaseModel):
@@ -225,6 +228,62 @@ class TaskCreatedResponseData(BaseModel):
 
     message: str
     """Human-readable message."""
+
+
+# Chunked upload schemas
+
+
+class ChunkedUploadInitResponse(BaseModel):
+    """Response when chunked upload session is initialized."""
+
+    task_id: int
+    """Upload session ID (task_id)."""
+
+    filename: str
+    """Original filename."""
+
+    file_size: int
+    """Total file size in bytes."""
+
+    chunk_size: int
+    """Size of each chunk in bytes."""
+
+    total_chunks: int
+    """Total number of chunks to upload."""
+
+    status: str
+    """Current session status (pending)."""
+
+    expires_at: str | None = None
+    """Session expiration timestamp (ISO format)."""
+
+
+class ChunkedUploadChunkResponse(BaseModel):
+    """Response after uploading a chunk."""
+
+    task_id: int
+    """Upload session ID."""
+
+    chunk_number: int
+    """Uploaded chunk number."""
+
+    uploaded_chunks: int
+    """Number of chunks uploaded so far."""
+
+    total_chunks: int
+    """Total number of chunks."""
+
+    uploaded_bytes: int
+    """Total bytes uploaded so far."""
+
+    total_bytes: int
+    """Total file size in bytes."""
+
+    progress_percentage: float
+    """Upload progress percentage."""
+
+    status: str
+    """Current session status (processing)."""
 
 
 # Reserved for future implementation
