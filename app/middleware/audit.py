@@ -59,18 +59,30 @@ async def audit_pat_middleware(request: Request, call_next):
 
             # Only log if token exists in our database (we need token_id)
             if pat:
-                # Determine authorization status
+                # Determine authorization status and reason
                 authorized = False
                 reason = None
 
+                # Check token validity first
                 if pat.is_revoked:
                     reason = "Token has been revoked"
                 elif ensure_aware(pat.expires_at) < datetime.now(timezone.utc):
                     reason = "Token has expired"
                 else:
-                    authorized = True
-                    # Update last_used_at for authorized tokens
                     pat.last_used_at = datetime.now(timezone.utc)
+                    # Token is valid, check actual authorization result from response
+                    if 200 <= response.status_code < 300:
+                        authorized = True
+                    elif response.status_code == 401:
+                        reason = "Unauthorized"
+                    elif response.status_code == 403:
+                        reason = "Insufficient permissions"
+                    elif 400 <= response.status_code < 500:
+                        reason = f"Client error ({response.status_code})"
+                    elif response.status_code >= 500:
+                        reason = f"Server error ({response.status_code})"
+                    else:
+                        reason = f"Request failed with status {response.status_code}"
 
                 # Create audit log entry
                 log_entry = PersonalAccessTokenAuditLog(

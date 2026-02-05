@@ -357,7 +357,7 @@ class TestAuditLoggingMiddleware:
         # Assert: Request was forbidden (not unauthorized)
         assert response.status_code == 403
 
-        # Assert: Audit log was created showing authorized=False
+        # Assert: Audit log was created showing authorized=False with reason
         logs = db_with_cleanup.execute(
             select(PersonalAccessTokenAuditLog).where(
                 PersonalAccessTokenAuditLog.token_id == pat_record.id
@@ -368,5 +368,5 @@ class TestAuditLoggingMiddleware:
         log = logs[0]
         assert log.method == "POST"
         assert log.status_code == 403
-        # Note: authorized=False for forbidden requests as well
-        # because the request wasn't fully authorized
+        assert log.authorized is False, "Forbidden requests should have authorized=False"
+        assert log.reason == "Insufficient permissions"
