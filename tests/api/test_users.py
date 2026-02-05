@@ -28,6 +28,13 @@ def _get_jwt(client) -> str:
     return response.json()["data"]["access_token"]
 
 
+def _check_has_permission(db, scope_names, required_scope):
+    """Helper to check permission using scope names instead of Scope objects."""
+    from app.services.pat import get_scopes_by_names
+    scopes = get_scopes_by_names(db, scope_names)
+    return has_permission(db, scopes, required_scope)
+
+
 def _create_pat(client, jwt, scopes, expires_in_days=30, name="Test Token") -> str:
     """Helper to create a PAT with given scopes."""
 
@@ -259,7 +266,7 @@ def test_users_me_unauthorized_non_pat_token(client):
 
 def test_users_me_scope_hierarchy_write_grants_read(client, db):
     """Verify users:write grants users:read access."""
-    assert has_permission(db, ["users:write"], "users:read") is True
+    assert _check_has_permission(db, ["users:write"], "users:read") is True
 
     jwt = _get_jwt(client)
     pat = _create_pat(client, jwt, ["users:write"])
@@ -275,7 +282,7 @@ def test_users_me_scope_hierarchy_write_grants_read(client, db):
 
 def test_users_me_scope_hierarchy_read_does_not_grant_write(db):
     """Verify users:read does NOT grant users:write access."""
-    assert has_permission(db, ["users:read"], "users:write") is False
+    assert _check_has_permission(db, ["users:read"], "users:write") is False
 
 
 # Cross-Resource Isolation Tests
@@ -283,12 +290,12 @@ def test_users_me_scope_hierarchy_read_does_not_grant_write(db):
 
 def test_users_me_no_cross_resource_workspaces_to_users(db):
     """Verify workspaces:admin does NOT grant users:read access."""
-    assert has_permission(db, ["workspaces:admin"], "users:read") is False
+    assert _check_has_permission(db, ["workspaces:admin"], "users:read") is False
 
 
 def test_users_me_no_cross_resource_fcs_to_users(db):
     """Verify fcs:analyze does NOT grant users:read access."""
-    assert has_permission(db, ["fcs:analyze"], "users:read") is False
+    assert _check_has_permission(db, ["fcs:analyze"], "users:read") is False
 
 
 def test_users_me_cross_resource_multiple_scopes(client):
@@ -573,7 +580,7 @@ def test_users_me_put_unauthorized_non_pat_token(client):
 
 def test_users_me_put_scope_hierarchy_write_grants_access(client, db):
     """Verify users:write satisfies users:write requirement for PUT /me."""
-    assert has_permission(db, ["users:write"], "users:write") is True
+    assert _check_has_permission(db, ["users:write"], "users:write") is True
 
     jwt = _get_jwt(client)
     pat = _create_pat(client, jwt, ["users:write"], name="Hierarchy Write Token")
@@ -589,7 +596,7 @@ def test_users_me_put_scope_hierarchy_write_grants_access(client, db):
 
 def test_users_me_put_scope_hierarchy_read_does_not_grant_write(db):
     """Verify users:read does NOT grant users:write access for PUT /me."""
-    assert has_permission(db, ["users:read"], "users:write") is False
+    assert _check_has_permission(db, ["users:read"], "users:write") is False
 
 
 # Cross-Resource Isolation Tests for PUT /me
@@ -597,12 +604,12 @@ def test_users_me_put_scope_hierarchy_read_does_not_grant_write(db):
 
 def test_users_me_put_no_cross_resource_workspaces_to_users(db):
     """Verify workspaces:admin does NOT grant users:write access."""
-    assert has_permission(db, ["workspaces:admin"], "users:write") is False
+    assert _check_has_permission(db, ["workspaces:admin"], "users:write") is False
 
 
 def test_users_me_put_no_cross_resource_fcs_to_users(db):
     """Verify fcs:analyze does NOT grant users:write access."""
-    assert has_permission(db, ["fcs:analyze"], "users:write") is False
+    assert _check_has_permission(db, ["fcs:analyze"], "users:write") is False
 
 
 def test_users_me_put_cross_resource_multiple_scopes(client):

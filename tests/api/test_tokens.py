@@ -124,32 +124,43 @@ def test_create_token_stored_securely(client, db):
 
 def test_scope_hierarchy_within_resource(db):
     """Test that higher level scopes include lower level scopes within same resource."""
+    from app.services.pat import get_scopes_by_names
+
     # workspaces:admin (level 4) should include workspaces:read (level 1)
-    assert has_permission(db, ["workspaces:admin"], "workspaces:read") is True
-    assert has_permission(db, ["workspaces:admin"], "workspaces:write") is True
-    assert has_permission(db, ["workspaces:admin"], "workspaces:delete") is True
-    assert has_permission(db, ["workspaces:admin"], "workspaces:admin") is True
+    admin_scopes = get_scopes_by_names(db, ["workspaces:admin"])
+    write_scopes = get_scopes_by_names(db, ["workspaces:write"])
+
+    assert has_permission(db, admin_scopes, "workspaces:read") is True
+    assert has_permission(db, admin_scopes, "workspaces:write") is True
+    assert has_permission(db, admin_scopes, "workspaces:delete") is True
+    assert has_permission(db, admin_scopes, "workspaces:admin") is True
 
     # workspaces:write (level 2) should include workspaces:read (level 1)
-    assert has_permission(db, ["workspaces:write"], "workspaces:read") is True
-    assert has_permission(db, ["workspaces:write"], "workspaces:write") is True
+    assert has_permission(db, write_scopes, "workspaces:read") is True
+    assert has_permission(db, write_scopes, "workspaces:write") is True
     # But not higher levels
-    assert has_permission(db, ["workspaces:write"], "workspaces:delete") is False
-    assert has_permission(db, ["workspaces:write"], "workspaces:admin") is False
+    assert has_permission(db, write_scopes, "workspaces:delete") is False
+    assert has_permission(db, write_scopes, "workspaces:admin") is False
 
 
 def test_scope_hierarchy_no_cross_resource(db):
     """Test that scopes don't inherit across different resources."""
+    from app.services.pat import get_scopes_by_names
+
     # workspaces:admin should NOT give access to fcs:read
-    assert has_permission(db, ["workspaces:admin"], "fcs:read") is False
-    assert has_permission(db, ["workspaces:admin"], "users:read") is False
+    admin_scopes = get_scopes_by_names(db, ["workspaces:admin"])
+    analyze_scopes = get_scopes_by_names(db, ["fcs:analyze"])
+
+    assert has_permission(db, admin_scopes, "fcs:read") is False
+    assert has_permission(db, admin_scopes, "users:read") is False
 
     # fcs:analyze should NOT give access to workspaces:read
-    assert has_permission(db, ["fcs:analyze"], "workspaces:read") is False
+    assert has_permission(db, analyze_scopes, "workspaces:read") is False
 
     # Multiple scopes from different resources
-    assert has_permission(db, ["workspaces:admin", "fcs:read"], "fcs:read") is True
-    assert has_permission(db, ["workspaces:admin", "fcs:read"], "fcs:write") is False
+    mixed_scopes = get_scopes_by_names(db, ["workspaces:admin", "fcs:read"])
+    assert has_permission(db, mixed_scopes, "fcs:read") is True
+    assert has_permission(db, mixed_scopes, "fcs:write") is False
 
 
 # List Tokens Tests

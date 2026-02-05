@@ -42,7 +42,7 @@ def list_workspaces(
             method=auth.method,
             required_scope=auth.required_scope,
             granted_by=auth.granted_by,
-            your_scopes=auth.scopes,
+            your_scopes=[scope.name for scope in auth.scopes],
         ),
     )
 
@@ -75,7 +75,7 @@ def create_workspace(
             method=auth.method,
             required_scope=auth.required_scope,
             granted_by=auth.granted_by,
-            your_scopes=auth.scopes,
+            your_scopes=[scope.name for scope in auth.scopes],
         ),
     )
 
@@ -110,7 +110,7 @@ def delete_workspace(
             method="DELETE",
             required_scope=auth.required_scope,
             granted_by=auth.granted_by,
-            your_scopes=auth.scopes,
+            your_scopes=[scope.name for scope in auth.scopes],
         ),
     )
 
@@ -145,6 +145,6 @@ def update_workspace_settings(
             method="PUT",
             required_scope=auth.required_scope,
             granted_by=auth.granted_by,
-            your_scopes=auth.scopes,
+            your_scopes=[scope.name for scope in auth.scopes],
         ),
     )

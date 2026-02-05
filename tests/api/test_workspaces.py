@@ -28,6 +28,13 @@ def _get_jwt(client) -> str:
     return response.json()["data"]["access_token"]
 
 
+def _check_has_permission(db, scope_names, required_scope):
+    """Helper to check permission using scope names instead of Scope objects."""
+    from app.services.pat import get_scopes_by_names
+    scopes = get_scopes_by_names(db, scope_names)
+    return has_permission(db, scopes, required_scope)
+
+
 def _create_pat(client, jwt, scopes, expires_in_days=30, name="Test Token") -> str:
     """Helper to create a PAT with given scopes."""
 
@@ -291,7 +298,7 @@ def test_workspaces_unauthorized_non_pat_token(client):
 
 def test_workspaces_scope_hierarchy_admin_grants_read(client, db):
     """Verify workspaces:admin grants workspaces:read access."""
-    assert has_permission(db, ["workspaces:admin"], "workspaces:read") is True
+    assert _check_has_permission(db, ["workspaces:admin"], "workspaces:read") is True
 
     jwt = _get_jwt(client)
     pat = _create_pat(client, jwt, ["workspaces:admin"])
@@ -307,7 +314,7 @@ def test_workspaces_scope_hierarchy_admin_grants_read(client, db):
 
 def test_workspaces_scope_hierarchy_delete_grants_read(client, db):
     """Verify workspaces:delete grants workspaces:read access."""
-    assert has_permission(db, ["workspaces:delete"], "workspaces:read") is True
+    assert _check_has_permission(db, ["workspaces:delete"], "workspaces:read") is True
 
     jwt = _get_jwt(client)
     pat = _create_pat(client, jwt, ["workspaces:delete"])
@@ -323,7 +330,7 @@ def test_workspaces_scope_hierarchy_delete_grants_read(client, db):
 
 def test_workspaces_scope_hierarchy_write_grants_read(client, db):
     """Verify workspaces:write grants workspaces:read access."""
-    assert has_permission(db, ["workspaces:write"], "workspaces:read") is True
+    assert _check_has_permission(db, ["workspaces:write"], "workspaces:read") is True
 
     jwt = _get_jwt(client)
     pat = _create_pat(client, jwt, ["workspaces:write"])
@@ -339,17 +346,17 @@ def test_workspaces_scope_hierarchy_write_grants_read(client, db):
 
 def test_workspaces_scope_hierarchy_read_does_not_grant_write(db):
     """Verify workspaces:read does NOT grant workspaces:write access."""
-    assert has_permission(db, ["workspaces:read"], "workspaces:write") is False
+    assert _check_has_permission(db, ["workspaces:read"], "workspaces:write") is False
 
 
 def test_workspaces_scope_hierarchy_write_does_not_grant_delete(db):
     """Verify workspaces:write does NOT grant workspaces:delete access."""
-    assert has_permission(db, ["workspaces:write"], "workspaces:delete") is False
+    assert _check_has_permission(db, ["workspaces:write"], "workspaces:delete") is False
 
 
 def test_workspaces_scope_hierarchy_delete_does_not_grant_admin(db):
     """Verify workspaces:delete does NOT grant workspaces:admin access."""
-    assert has_permission(db, ["workspaces:delete"], "workspaces:admin") is False
+    assert _check_has_permission(db, ["workspaces:delete"], "workspaces:admin") is False
 
 
 # Cross-Resource Isolation Tests
@@ -357,17 +364,17 @@ def test_workspaces_scope_hierarchy_delete_does_not_grant_admin(db):
 
 def test_workspaces_no_cross_resource_fcs_to_workspaces(db):
     """Verify fcs:analyze does NOT grant workspaces:read access."""
-    assert has_permission(db, ["fcs:analyze"], "workspaces:read") is False
+    assert _check_has_permission(db, ["fcs:analyze"], "workspaces:read") is False
 
 
 def test_workspaces_no_cross_resource_workspaces_to_fcs(db):
     """Verify workspaces:admin does NOT grant fcs:read access."""
-    assert has_permission(db, ["workspaces:admin"], "fcs:read") is False
+    assert _check_has_permission(db, ["workspaces:admin"], "fcs:read") is False
 
 
 def test_workspaces_no_cross_resource_users_to_workspaces(db):
     """Verify users:admin does NOT grant workspaces:read access."""
-    assert has_permission(db, ["users:admin"], "workspaces:read") is False
+    assert _check_has_permission(db, ["users:admin"], "workspaces:read") is False
 
 
 def test_workspaces_cross_resource_multiple_scopes(client):
@@ -609,7 +616,7 @@ def test_workspaces_post_unauthorized_expired_token(client, db):
 
 def test_workspaces_post_scope_hierarchy_admin_grants_write(client, db):
     """Verify workspaces:admin grants workspaces:write access."""
-    assert has_permission(db, ["workspaces:admin"], "workspaces:write") is True
+    assert _check_has_permission(db, ["workspaces:admin"], "workspaces:write") is True
 
     jwt = _get_jwt(client)
     pat = _create_pat(client, jwt, ["workspaces:admin"])
@@ -625,7 +632,7 @@ def test_workspaces_post_scope_hierarchy_admin_grants_write(client, db):
 
 def test_workspaces_post_scope_hierarchy_delete_grants_write(client, db):
     """Verify workspaces:delete grants workspaces:write access."""
-    assert has_permission(db, ["workspaces:delete"], "workspaces:write") is True
+    assert _check_has_permission(db, ["workspaces:delete"], "workspaces:write") is True
 
     jwt = _get_jwt(client)
     pat = _create_pat(client, jwt, ["workspaces:delete"])
@@ -641,12 +648,12 @@ def test_workspaces_post_scope_hierarchy_delete_grants_write(client, db):
 
 def test_workspaces_post_scope_hierarchy_write_does_not_grant_delete(db):
     """Verify workspaces:write does NOT grant workspaces:delete access."""
-    assert has_permission(db, ["workspaces:write"], "workspaces:delete") is False
+    assert _check_has_permission(db, ["workspaces:write"], "workspaces:delete") is False
 
 
 def test_workspaces_post_scope_hierarchy_read_does_not_grant_write(db):
     """Verify workspaces:read does NOT grant workspaces:write access."""
-    assert has_permission(db, ["workspaces:read"], "workspaces:write") is False
+    assert _check_has_permission(db, ["workspaces:read"], "workspaces:write") is False
 
 
 def test_workspaces_post_cross_resource_with_correct_scope(client):
@@ -876,7 +883,7 @@ def test_workspaces_delete_unauthorized_expired_token(client, db):
 
 def test_workspaces_delete_scope_hierarchy_admin_grants_delete(client, db):
     """Verify workspaces:admin grants workspaces:delete access."""
-    assert has_permission(db, ["workspaces:admin"], "workspaces:delete") is True
+    assert _check_has_permission(db, ["workspaces:admin"], "workspaces:delete") is True
 
     jwt = _get_jwt(client)
     pat = _create_pat(client, jwt, ["workspaces:admin"])
@@ -892,12 +899,12 @@ def test_workspaces_delete_scope_hierarchy_admin_grants_delete(client, db):
 
 def test_workspaces_delete_scope_hierarchy_delete_does_not_grant_admin(db):
     """Verify workspaces:delete does NOT grant workspaces:admin access."""
-    assert has_permission(db, ["workspaces:delete"], "workspaces:admin") is False
+    assert _check_has_permission(db, ["workspaces:delete"], "workspaces:admin") is False
 
 
 def test_workspaces_delete_no_cross_resource_fcs_to_workspaces(db):
     """Verify fcs:analyze does NOT grant workspaces:delete access."""
-    assert has_permission(db, ["fcs:analyze"], "workspaces:delete") is False
+    assert _check_has_permission(db, ["fcs:analyze"], "workspaces:delete") is False
 
 
 def test_workspaces_delete_cross_resource_with_correct_scope(client):
@@ -970,10 +977,10 @@ def test_workspaces_settings_success_highest_scope_wins(client):
 
 def test_workspaces_settings_scope_hierarchy_only_admin_grants_access(client, db):
     """Verify only workspaces:admin grants access to settings endpoint."""
-    assert has_permission(db, ["workspaces:read"], "workspaces:admin") is False
-    assert has_permission(db, ["workspaces:write"], "workspaces:admin") is False
-    assert has_permission(db, ["workspaces:delete"], "workspaces:admin") is False
-    assert has_permission(db, ["workspaces:admin"], "workspaces:admin") is True
+    assert _check_has_permission(db, ["workspaces:read"], "workspaces:admin") is False
+    assert _check_has_permission(db, ["workspaces:write"], "workspaces:admin") is False
+    assert _check_has_permission(db, ["workspaces:delete"], "workspaces:admin") is False
+    assert _check_has_permission(db, ["workspaces:admin"], "workspaces:admin") is True
 
     jwt = _get_jwt(client)
     pat = _create_pat(client, jwt, ["workspaces:admin"])
@@ -1176,7 +1183,7 @@ def test_workspaces_settings_unauthorized_non_pat_token(client):
 
 def test_workspaces_settings_no_cross_resource(db):
     """Verify fcs:analyze does NOT grant workspaces:admin access."""
-    assert has_permission(db, ["fcs:analyze"], "workspaces:admin") is False
+    assert _check_has_permission(db, ["fcs:analyze"], "workspaces:admin") is False
 
 
 def test_workspaces_settings_cross_resource_with_correct_scope(client):
@@ -1194,14 +1201,14 @@ def test_workspaces_settings_cross_resource_with_correct_scope(client):
 
 def test_workspaces_settings_scope_hierarchy_read_does_not_grant_admin(db):
     """Verify workspaces:read does NOT grant workspaces:admin access."""
-    assert has_permission(db, ["workspaces:read"], "workspaces:admin") is False
+    assert _check_has_permission(db, ["workspaces:read"], "workspaces:admin") is False
 
 
 def test_workspaces_settings_scope_hierarchy_write_does_not_grant_admin(db):
     """Verify workspaces:write does NOT grant workspaces:admin access."""
-    assert has_permission(db, ["workspaces:write"], "workspaces:admin") is False
+    assert _check_has_permission(db, ["workspaces:write"], "workspaces:admin") is False
 
 
 def test_workspaces_settings_scope_hierarchy_delete_does_not_grant_admin(db):
     """Verify workspaces:delete does NOT grant workspaces:admin access."""
-    assert has_permission(db, ["workspaces:delete"], "workspaces:admin") is False
+    assert _check_has_permission(db, ["workspaces:delete"], "workspaces:admin") is False

@@ -30,6 +30,13 @@ def _get_jwt(client) -> str:
     return response.json()["data"]["access_token"]
 
 
+def _check_has_permission(db, scope_names, required_scope):
+    """Helper to check permission using scope names instead of Scope objects."""
+    from app.services.pat import get_scopes_by_names
+    scopes = get_scopes_by_names(db, scope_names)
+    return has_permission(db, scopes, required_scope)
+
+
 def _create_pat(client, jwt, scopes, expires_in_days=30, name="Test Token") -> str:
     """Helper to create a PAT with given scopes."""
     response = client.post(
@@ -244,7 +251,7 @@ def test_fcs_parameters_unauthorized_non_pat_token(client):
 
 def test_fcs_scope_hierarchy_analyze_grants_read(client, db):
     """Verify fcs:analyze grants fcs:read access."""
-    assert has_permission(db, ["fcs:analyze"], "fcs:read") is True
+    assert _check_has_permission(db, ["fcs:analyze"], "fcs:read") is True
 
     jwt = _get_jwt(client)
     pat = _create_pat(client, jwt, ["fcs:analyze"])
@@ -259,7 +266,7 @@ def test_fcs_scope_hierarchy_analyze_grants_read(client, db):
 
 def test_fcs_scope_hierarchy_write_grants_read(client, db):
     """Verify fcs:write grants fcs:read access."""
-    assert has_permission(db, ["fcs:write"], "fcs:read") is True
+    assert _check_has_permission(db, ["fcs:write"], "fcs:read") is True
 
     jwt = _get_jwt(client)
     pat = _create_pat(client, jwt, ["fcs:write"])
@@ -274,12 +281,12 @@ def test_fcs_scope_hierarchy_write_grants_read(client, db):
 
 def test_fcs_scope_hierarchy_read_does_not_grant_write(db):
     """Verify fcs:read does NOT grant fcs:write access."""
-    assert has_permission(db, ["fcs:read"], "fcs:write") is False
+    assert _check_has_permission(db, ["fcs:read"], "fcs:write") is False
 
 
 def test_fcs_scope_hierarchy_write_does_not_grant_analyze(db):
     """Verify fcs:write does NOT grant fcs:analyze access."""
-    assert has_permission(db, ["fcs:write"], "fcs:analyze") is False
+    assert _check_has_permission(db, ["fcs:write"], "fcs:analyze") is False
 
 
 # Cross-Resource Isolation Tests
@@ -287,12 +294,12 @@ def test_fcs_scope_hierarchy_write_does_not_grant_analyze(db):
 
 def test_fcs_no_cross_resource_workspaces_to_fcs(db):
     """Verify workspaces:admin does NOT grant fcs:read access."""
-    assert has_permission(db, ["workspaces:admin"], "fcs:read") is False
+    assert _check_has_permission(db, ["workspaces:admin"], "fcs:read") is False
 
 
 def test_fcs_no_cross_resource_users_to_fcs(db):
     """Verify users:write does NOT grant fcs:read access."""
-    assert has_permission(db, ["users:write"], "fcs:read") is False
+    assert _check_has_permission(db, ["users:write"], "fcs:read") is False
 
 
 def test_fcs_cross_resource_with_correct_scope(client):
@@ -798,7 +805,7 @@ def test_fcs_statistics_requires_analyze_scope(client, db):
     from app.services.pat import has_permission
 
     # fcs:read should NOT grant fcs:analyze access
-    assert has_permission(db, ["fcs:read"], "fcs:analyze") is False
+    assert _check_has_permission(db, ["fcs:read"], "fcs:analyze") is False
 
 
 def test_fcs_analyze_grants_statistics_access(client):

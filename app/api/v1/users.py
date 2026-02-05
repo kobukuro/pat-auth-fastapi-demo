@@ -42,7 +42,7 @@ def get_current_user(
             method=auth.method,
             required_scope=auth.required_scope,
             granted_by=auth.granted_by,
-            your_scopes=auth.scopes,
+            your_scopes=[scope.name for scope in auth.scopes],
         ),
     )
 
@@ -75,6 +75,6 @@ def update_current_user(
             method=auth.method,
             required_scope=auth.required_scope,
             granted_by=auth.granted_by,
-            your_scopes=auth.scopes,
+            your_scopes=[scope.name for scope in auth.scopes],
         ),
     )
