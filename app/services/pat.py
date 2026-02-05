@@ -32,7 +32,16 @@ def validate_scopes(db: Session, scope_names: list[str]) -> bool:
     return len(existing) == len(scope_names)
 
 
-def has_permission(db: Session, granted_scopes: list[str], required_scope: str) -> bool:
+def get_scopes_by_names(db: Session, scope_names: list[str]) -> list[Scope]:
+    """Retrieve Scope objects by their names."""
+    if not scope_names:
+        return []
+    return list(db.execute(
+        select(Scope).where(Scope.name.in_(scope_names))
+    ).scalars().all())
+
+
+def has_permission(db: Session, granted_scopes: list[Scope], required_scope: str) -> bool:
     """
     Check if granted_scopes satisfy required_scope.
 
@@ -43,9 +52,8 @@ def has_permission(db: Session, granted_scopes: list[str], required_scope: str) 
     if not required:
         return False
 
-    for scope_name in granted_scopes:
-        granted = db.execute(select(Scope).where(Scope.name == scope_name)).scalar_one_or_none()
-        if granted and granted.resource == required.resource and granted.level >= required.level:
+    for granted in granted_scopes:
+        if granted.resource == required.resource and granted.level >= required.level:
             return True
 
     return False

@@ -5,7 +5,6 @@ This module provides dependencies for validating Personal Access Tokens (PATs)
 and extracting their associated scopes for authorization checks.
 """
 import hashlib
-import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -25,7 +24,7 @@ security = HTTPBearer()
 def get_pat_with_scopes(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db),
-) -> tuple[PersonalAccessToken, list[str]]:
+) -> tuple[PersonalAccessToken, list[Scope]]:
     """
     Validate PAT token and return PAT record with scopes.
 
@@ -38,7 +37,7 @@ def get_pat_with_scopes(
         db: Database session
 
     Returns:
-        A tuple of (PAT record, list of scope names)
+        A tuple of (PAT record, list of Scope objects)
 
     Raises:
         HTTPException: 401 if token is invalid, expired, or revoked
@@ -101,8 +100,8 @@ def get_pat_with_scopes(
             },
         )
 
-    # Parse scopes from JSON
-    scopes = json.loads(pat.scopes)
+    # Use ORM relationship (lazy="selectin" preloads scopes)
+    scopes = pat.scopes
 
     return pat, scopes
 
@@ -114,8 +113,8 @@ class AuthContext:
     pat: PersonalAccessToken
     """The validated Personal Access Token"""
 
-    scopes: list[str]
-    """List of scopes associated with the PAT"""
+    scopes: list[Scope]
+    """List of Scope objects associated with the PAT"""
 
     required_scope: str
     """The scope required for the current endpoint"""
@@ -142,7 +141,7 @@ def require_scope(required_scope: str):
     """
     def dependency(
         request: Request,
-        pat_data: tuple[PersonalAccessToken, list[str]] = Depends(get_pat_with_scopes),
+        pat_data: tuple[PersonalAccessToken, list[Scope]] = Depends(get_pat_with_scopes),
         db: Session = Depends(get_db),
     ) -> AuthContext:
         pat, scopes = pat_data
@@ -156,7 +155,7 @@ def require_scope(required_scope: str):
                     "error": "Forbidden",
                     "data": {
                         "required_scope": required_scope,
-                        "your_scopes": scopes,
+                        "your_scopes": [scope.name for scope in scopes],
                     },
                 },
             )
@@ -177,7 +176,7 @@ def require_scope(required_scope: str):
 
 
 def _find_granting_scope(
-    db: Session, scopes: list[str], required_scope: str
+    db: Session, scopes: list[Scope], required_scope: str
 ) -> str | None:
     """
     Find which scope from the list granted access to required_scope.
@@ -187,7 +186,7 @@ def _find_granting_scope(
 
     Args:
         db: Database session
-        scopes: List of scope names the user has
+        scopes: List of Scope objects the user has
         required_scope: The scope being checked
 
     Returns:
@@ -203,17 +202,12 @@ def _find_granting_scope(
 
     # Find all granting scopes (same resource, level >= required level)
     granting_scopes = []
-    for scope_name in scopes:
-        granted = db.execute(
-            select(Scope).where(Scope.name == scope_name)
-        ).scalar_one_or_none()
-
+    for granted in scopes:
         if (
-            granted
-            and granted.resource == required.resource
+            granted.resource == required.resource
             and granted.level >= required.level
         ):
-            granting_scopes.append((granted.level, scope_name))
+            granting_scopes.append((granted.level, granted.name))
 
     # Return highest level granting scope
     if granting_scopes:

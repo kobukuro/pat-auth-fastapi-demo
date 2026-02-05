@@ -1,4 +1,3 @@
-import json
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -10,11 +9,12 @@ from app.dependencies.auth import get_current_user
 from app.dependencies.token import get_validated_token
 from app.models.audit_log import PersonalAccessTokenAuditLog
 from app.models.pat import PersonalAccessToken
+from app.models.scope import Scope
 from app.models.user import User
 from app.schemas.audit_log import AuditLogEntry, TokenAuditLogsResponse
 from app.schemas.common import APIResponse
 from app.schemas.pat import PATCreateRequest, PATCreateResponse, PATListItemResponse
-from app.services.pat import generate_pat, validate_scopes
+from app.services.pat import generate_pat, validate_scopes, get_scopes_by_names
 
 router = APIRouter(prefix="/tokens", tags=["tokens"])
 
@@ -45,13 +45,16 @@ def create_token(
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(days=request.expires_in_days)
 
+    # Get Scope objects
+    scope_objects = get_scopes_by_names(db, request.scopes)
+
     # Create PAT record
     pat = PersonalAccessToken(
         user_id=current_user.id,
         name=request.name,
         token_prefix=prefix,
         token_hash=token_hash,
-        scopes=json.dumps(request.scopes),
+        scopes=scope_objects,
         created_at=now,
         expires_at=expires_at,
     )
@@ -93,7 +96,7 @@ def list_tokens(
             id=token.id,
             name=token.name,
             token_prefix=token.token_prefix,
-            scopes=json.loads(token.scopes),
+            scopes=[scope.name for scope in token.scopes],
             created_at=token.created_at,
             expires_at=token.expires_at,
             last_used_at=token.last_used_at,
@@ -120,7 +123,7 @@ def get_token(
             id=token.id,
             name=token.name,
             token_prefix=token.token_prefix,
-            scopes=json.loads(token.scopes),
+            scopes=[scope.name for scope in token.scopes],
             created_at=token.created_at,
             expires_at=token.expires_at,
             last_used_at=token.last_used_at,
