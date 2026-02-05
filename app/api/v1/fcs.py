@@ -19,6 +19,8 @@ from app.models.fcs_file import FCSFile
 from app.models.fcs_statistics import FCSStatistics
 from app.schemas.common import APIResponse
 from app.schemas.fcs import (
+    ChunkedUploadChunkResponse,
+    ChunkedUploadInitResponse,
     FCSEventsResponseData,
     FCSFileResponse,
     FCSParametersResponseData,
@@ -282,53 +284,55 @@ def get_fcs_events_endpoint(
 
 @router.post(
     "/upload",
-    response_model=APIResponse[FCSFileResponse],
+    response_model=APIResponse[ChunkedUploadInitResponse],
     status_code=status.HTTP_201_CREATED,
 )
-async def upload_fcs_file(
-    file: UploadFile,
+async def init_chunked_upload(
+    filename: str = Form(...),
+    file_size: int = Form(..., gt=0, le=1000*1024*1024),  # Max 1GB
+    chunk_size: int = Form(5*1024*1024, ge=1*1024*1024, le=10*1024*1024),  # 1-10MB, default 5MB
     is_public: bool = Form(True),
     auth: AuthContext = Depends(require_scope("fcs:write")),
     db: Session = Depends(get_db),
     storage: StorageBackend = Depends(get_storage),
 ):
     """
-    Upload FCS file with streaming and background metadata extraction.
+    Initialize chunked upload session for FCS file.
 
-    Uploads an FCS file to local storage with streaming I/O for efficiency,
-    extracts metadata using flowio, and stores file information in the database.
+    Creates an upload session and returns a task_id for tracking progress.
+    Client should then upload chunks using POST /upload/chunk.
 
     **Scope required:** `fcs:write`
 
-    **Features:**
-    - Streaming upload (64KB chunks) for low memory usage
-    - File validation (extension, content-type, FCS format)
-    - Automatic metadata extraction (events count, parameters)
-    - Short ID generation for file links
+    **Request (multipart/form-data):**
+    - filename: Original filename (must end with .fcs)
+    - file_size: Total file size in bytes (max 1GB)
+    - chunk_size: Size of each chunk in bytes (1-10MB, default 5MB)
+    - is_public: Whether file should be publicly accessible
 
-    Args:
-        file: FCS file to upload (multipart/form-data)
-        is_public: Whether file should be publicly accessible
-        auth: AuthContext containing PAT and user info
-        db: Database session
-        storage: Storage backend for file operations
+    **Returns:**
+    - task_id: Upload session ID for tracking
+    - chunk_size: Actual chunk size used
+    - total_chunks: Total number of chunks to upload
+    - status: Current session status
 
-    Returns:
-        APIResponse with FCSFileResponse containing:
-        - file_id: Short identifier for the file
-        - filename: Original filename
-        - file_size: Size in bytes
-        - total_events: Number of events in the file
-        - total_parameters: Number of parameters
-
-    Raises:
-        HTTPException 400: Invalid file type or size
-        HTTPException 500: Upload or parsing failure
+    **Example:**
+    ```bash
+    curl -X POST http://localhost:8000/api/v1/fcs/upload \\
+      -H "Authorization: Bearer pat_abc123..." \\
+      -F "filename=sample.fcs" \\
+      -F "file_size=157286400" \\
+      -F "chunk_size=5242880" \\
+      -F "is_public=true"
+    ```
     """
-    # 1. Validate file extension
-    if not file.filename.lower().endswith(tuple(settings.ALLOWED_FCS_EXTENSIONS)):
+    from datetime import datetime, timedelta
+    from app.models.background_task import BackgroundTask
+
+    # 1. Validate filename
+    if not filename.lower().endswith(tuple(settings.ALLOWED_FCS_EXTENSIONS)):
         logger.warning(
-            f"Invalid file extension: {file.filename}. Allowed: {settings.ALLOWED_FCS_EXTENSIONS}"
+            f"Invalid file extension: {filename}. Allowed: {settings.ALLOWED_FCS_EXTENSIONS}"
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -339,116 +343,333 @@ async def upload_fcs_file(
             },
         )
 
-    # 2. Validate Content-Type if provided
-    if file.content_type and file.content_type not in settings.ALLOWED_FCS_CONTENT_TYPES:
-        logger.warning(f"Invalid content-type: {file.content_type}")
-        # Don't reject, just log - Content-Type can be unreliable
+    # 2. Calculate total chunks
+    total_chunks = (file_size + chunk_size - 1) // chunk_size  # Ceiling division
 
-    # 3. Generate short ID
-    file_id = generate_short_id()
+    # 3. Create BackgroundTask for upload session
+    task = BackgroundTask(
+        task_type="chunked_upload",
+        status="pending",
+        user_id=auth.pat.user_id,
+        expires_at=datetime.now() + timedelta(hours=24),
+        extra_data={
+            "filename": filename,
+            "file_size": file_size,
+            "total_chunks": total_chunks,
+            "chunk_size": chunk_size,
+            "uploaded_chunks": 0,
+            "uploaded_bytes": 0,
+            "uploaded_chunk_numbers": [],  # Track which chunks have been uploaded
+        },
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
 
-    # 4. Start timer for upload duration tracking
-    upload_start = time.time()
+    task_id = task.id
 
-    # 5. Stream file to storage (async, low memory)
+    # 4. Initialize storage (create temp file)
     try:
-        file_path = await storage.save_file(
-            file_id=file_id,
-            file_stream=file.file,
-            content_type=file.content_type or "application/octet-stream",
+        temp_path = await storage.init_chunked_upload(
+            session_id=str(task_id),
+            filename=filename,
+            file_size=file_size,
+            chunk_size=chunk_size,
         )
+
+        # Update task with temp path and status
+        task.extra_data["temp_file_path"] = temp_path
+        task.status = "processing"
+        db.commit()
+
     except Exception as e:
-        logger.error(f"File upload failed for {file.filename}: {str(e)}", exc_info=True)
+        logger.error(f"Failed to init chunked upload: {str(e)}", exc_info=True)
+        task.status = "failed"
+        task.result = {"error_message": str(e)}
+        db.commit()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "success": False,
                 "error": "Internal Server Error",
-                "message": "Failed to upload file",
+                "message": "Failed to initialize upload session",
             },
         )
 
-    # 6. Stop timer
-    upload_duration_ms = int((time.time() - upload_start) * 1000)
+    # 5. Log successful initialization
+    logger.info(
+        f"Chunked upload initialized: task_id={task_id}, "
+        f"filename={filename}, size={file_size}, chunks={total_chunks}, "
+        f"user_id={auth.pat.user_id}"
+    )
 
-    # 7. Parse FCS metadata with flowio
-    try:
-        params_data = get_fcs_parameters(file_path)
-    except FileNotFoundError:
-        # File was not saved correctly
-        logger.error(f"Uploaded file not found at path: {file_path}")
-        # Clean up the uploaded file
-        await storage.delete_file(file_id)
+    # 6. Return session info
+    return APIResponse(
+        success=True,
+        data={
+            "task_id": task_id,
+            "filename": filename,
+            "file_size": file_size,
+            "chunk_size": chunk_size,
+            "total_chunks": total_chunks,
+            "status": "processing",
+            "expires_at": task.expires_at.isoformat() if task.expires_at else None,
+        },
+    )
+
+
+@router.post(
+    "/upload/chunk",
+    response_model=APIResponse[ChunkedUploadChunkResponse],
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def upload_chunk(
+    background_tasks: BackgroundTasks,
+    task_id: int = Form(...),
+    chunk_number: int = Form(..., ge=0),
+    chunk: UploadFile = Form(...),
+    auth: AuthContext = Depends(require_scope("fcs:write")),
+    db: Session = Depends(get_db),
+    storage: StorageBackend = Depends(get_storage),
+):
+    """
+    Upload a single chunk for a chunked upload session.
+
+    **Scope required:** `fcs:write`
+
+    **Request (multipart/form-data):**
+    - task_id: Upload session ID
+    - chunk_number: Chunk sequence number (0-based)
+    - chunk: Chunk file data
+
+    **Returns:**
+    - task_id: Upload session ID
+    - chunk_number: Uploaded chunk number
+    - uploaded_chunks: Number of chunks uploaded so far
+    - total_chunks: Total number of chunks
+    - progress_percentage: Upload progress percentage
+
+    **Example:**
+    ```bash
+    # Upload chunk 0
+    dd if=sample.fcs bs=5M count=1 skip=0 | curl -X POST \\
+      http://localhost:8000/api/v1/fcs/upload/chunk \\
+      -H "Authorization: Bearer pat_abc123..." \\
+      -F "task_id=123" \\
+      -F "chunk_number=0" \\
+      -F "chunk=@-"
+    ```
+    """
+    from app.models.background_task import BackgroundTask
+
+    # 1. Get upload session
+    task = db.query(BackgroundTask).filter_by(id=task_id).first()
+
+    if not task:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail={
                 "success": False,
-                "error": "Internal Server Error",
-                "message": "File upload failed",
+                "error": "Not Found",
+                "message": "Upload session not found",
             },
         )
-    except Exception as e:
-        # Invalid FCS format - delete uploaded file
-        logger.warning(f"Invalid FCS file {file.filename}: {str(e)}")
-        await storage.delete_file(file_id)
+
+    # 2. Permission check
+    if task.user_id != auth.pat.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "success": False,
+                "error": "Forbidden",
+                "message": "Not your upload session",
+            },
+        )
+
+    # 3. Validate session status
+    if task.status not in ["pending", "processing"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "success": False,
                 "error": "Bad Request",
-                "message": "Invalid FCS file format",
+                "message": f"Cannot upload to session with status: {task.status}",
             },
         )
 
-    # 8. Get file size
-    file_size = file.size or 0
-
-    # 9. Save to database
-    try:
-        fcs_file = FCSFile(
-            file_id=file_id,
-            filename=file.filename,
-            file_path=file_path,
-            file_size=file_size,
-            total_events=params_data.total_events,
-            total_parameters=params_data.total_parameters,
-            is_public=is_public,
-            upload_duration_ms=upload_duration_ms,
-            user_id=auth.pat.user_id,
+    # 4. Validate chunk_number
+    if chunk_number >= (task.extra_data or {}).get("total_chunks", 0):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "success": False,
+                "error": "Bad Request",
+                "message": f"Invalid chunk_number. Max is {(task.extra_data or {}).get('total_chunks', 0) - 1}",
+            },
         )
-        db.add(fcs_file)
+
+    # 5. Read chunk data
+    chunk_data = await chunk.read()
+
+    # 6. Save chunk
+    try:
+        bytes_written = await storage.save_chunk(
+            session_id=str(task_id),
+            chunk_number=chunk_number,
+            chunk_data=chunk_data,
+        )
+
+        # Update progress (Prevent double counting)
+        from sqlalchemy.orm.attributes import flag_modified
+
+        extra_data = task.extra_data or {}
+        if chunk_number not in extra_data.get("uploaded_chunk_numbers", []):
+            extra_data["uploaded_chunk_numbers"].append(chunk_number)
+            extra_data["uploaded_chunks"] = extra_data.get("uploaded_chunks", 0) + 1
+        extra_data["uploaded_bytes"] = extra_data.get("uploaded_bytes", 0) + bytes_written
+        task.extra_data = extra_data
+        flag_modified(task, "extra_data")  # Explicitly mark JSON column as modified
         db.commit()
-        db.refresh(fcs_file)
+
     except Exception as e:
-        logger.error(f"Failed to save FCS file metadata: {str(e)}", exc_info=True)
-        # Clean up uploaded file
-        await storage.delete_file(file_id)
+        logger.error(f"Failed to save chunk {chunk_number}: {str(e)}", exc_info=True)
+        task.status = "failed"
+        task.result = {"error_message": str(e)}
+        db.commit()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "success": False,
                 "error": "Internal Server Error",
-                "message": "Failed to save file metadata",
+                "message": "Failed to save chunk",
             },
         )
 
-    # 10. Log successful upload
-    logger.info(
-        f"FCS file uploaded successfully: file_id={file_id}, "
-        f"filename={file.filename}, size={file_size}, "
-        f"events={params_data.total_events}, parameters={params_data.total_parameters}, "
-        f"duration_ms={upload_duration_ms}, user_id={auth.pat.user_id}"
-    )
+    # 7. Auto-trigger completion on last chunk (防重入)
+    is_last_chunk = (task.extra_data["uploaded_chunks"] == task.extra_data["total_chunks"])
 
-    # 11. Return result
+    if is_last_chunk and task.status not in ["finalizing", "completed"]:
+        # Trigger background completion task (don't set status here, let the background task handle it)
+        from app.services.chunked_upload import finalize_chunked_upload
+        background_tasks.add_task(
+            finalize_chunked_upload,
+            task_id=task_id,
+            db_session_factory=lambda: db,  # Use current db session to avoid transaction issues in tests
+        )
+
+        logger.info(f"Auto-triggered finalization for task_id={task_id}")
+
+    # 8. Calculate progress
+    total_chunks = task.extra_data["total_chunks"]
+    uploaded_chunks = task.extra_data["uploaded_chunks"]
+    uploaded_bytes = task.extra_data["uploaded_bytes"]
+    total_bytes = task.extra_data["file_size"]
+    progress_percentage = round((uploaded_bytes / total_bytes) * 100, 2) if total_bytes > 0 else 0.0
+
+    # 9. Return progress
     return APIResponse(
         success=True,
         data={
-            "file_id": fcs_file.file_id,
-            "filename": fcs_file.filename,
-            "file_size": fcs_file.file_size,
-            "total_events": fcs_file.total_events,
-            "total_parameters": fcs_file.total_parameters,
+            "task_id": task_id,
+            "chunk_number": chunk_number,
+            "uploaded_chunks": uploaded_chunks,
+            "total_chunks": total_chunks,
+            "uploaded_bytes": uploaded_bytes,
+            "total_bytes": total_bytes,
+            "progress_percentage": progress_percentage,
+            "status": task.status,
+        },
+    )
+
+
+@router.post(
+    "/upload/abort",
+    response_model=APIResponse[dict],
+    status_code=status.HTTP_200_OK,
+)
+async def abort_chunked_upload(
+    task_id: int = Form(...),
+    auth: AuthContext = Depends(require_scope("fcs:write")),
+    db: Session = Depends(get_db),
+    storage: StorageBackend = Depends(get_storage),
+):
+    """
+    Abort a chunked upload session and clean up resources.
+
+    **Scope required:** `fcs:write`
+
+    **Request (multipart/form-data):**
+    - task_id: Upload session ID
+
+    **Returns:**
+    - task_id: Aborted session ID
+    - status: "aborted"
+    - message: Confirmation message
+
+    **Example:**
+    ```bash
+    curl -X POST http://localhost:8000/api/v1/fcs/upload/abort \\
+      -H "Authorization: Bearer pat_abc123..." \\
+      -F "task_id=123"
+    ```
+    """
+    from app.models.background_task import BackgroundTask
+
+    # 1. Get upload session
+    task = db.query(BackgroundTask).filter_by(id=task_id).first()
+
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "success": False,
+                "error": "Not Found",
+                "message": "Upload session not found",
+            },
+        )
+
+    # 2. Permission check
+    if task.user_id != auth.pat.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "success": False,
+                "error": "Forbidden",
+                "message": "Not your upload session",
+            },
+        )
+
+    # 3. Cannot abort completed sessions
+    if task.status == "completed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "success": False,
+                "error": "Bad Request",
+                "message": "Cannot abort completed upload",
+            },
+        )
+
+    # 4. Clean up storage
+    try:
+        await storage.abort_chunked_upload(str(task_id))
+    except Exception as e:
+        logger.error(f"Failed to cleanup upload session {task_id}: {str(e)}", exc_info=True)
+
+    # 5. Update session
+    task.status = "failed"
+    task.result = {"error_message": "Upload aborted by user"}
+    db.commit()
+
+    # 6. Log
+    logger.info(f"Upload session aborted: task_id={task_id}")
+
+    return APIResponse(
+        success=True,
+        data={
+            "task_id": task_id,
+            "status": "failed",
+            "message": "Upload session aborted successfully",
         },
     )
 
@@ -721,10 +942,10 @@ async def get_task_status_endpoint(
     """
     Get background task status and result.
 
-    Returns the current status of a background statistics calculation task,
+    Returns the current status of a background task (statistics or chunked upload),
     along with the result if completed.
 
-    **Scope required:** `fcs:analyze`
+    **Scope required:** `fcs:analyze` (statistics) or `fcs:read` (chunked upload)
 
     Args:
         task_id: Task ID (auto-increment integer)
@@ -734,10 +955,12 @@ async def get_task_status_endpoint(
     Returns:
         APIResponse with TaskResponseData containing:
         - task_id: Task ID
-        - status: Current status (pending, processing, completed, failed)
+        - status: Current status (pending, processing, finalizing, completed, failed)
         - created_at: Creation timestamp
-        - completed_at: Completion timestamp (if completed)
-        - result: Statistics result or error (if completed/failed)
+        - completed_at: Completion timestamp (if completed/failed)
+        - result: Task result based on task_type:
+          - "statistics": Statistics data
+          - "chunked_upload": Upload progress or FCSFile info
 
     Raises:
         HTTPException 404: If task not found
@@ -773,20 +996,67 @@ async def get_task_status_endpoint(
             },
         )
 
-    # 3. Build response data
+    # 3. Build response data based on task_type
     response_data = {
         "task_id": task.id,
+        "task_type": task.task_type,
         "status": task.status,
         "created_at": task.created_at.isoformat(),
     }
 
-    if task.status == "completed" and task.result:
-        response_data["completed_at"] = task.completed_at.isoformat()
-        response_data["result"] = task.result
-    elif task.status == "failed" and task.result:
-        response_data["completed_at"] = task.completed_at.isoformat()
-        response_data["result"] = task.result
+    if task.task_type == "statistics":
+        # Statistics task - return existing format
+        if task.status == "completed" and task.result:
+            response_data["completed_at"] = task.completed_at.isoformat()
+            response_data["result"] = task.result
+        elif task.status == "failed" and task.result:
+            response_data["completed_at"] = task.completed_at.isoformat()
+            response_data["result"] = task.result
 
-    logger.info(f"Task status requested: task_id={task_id}, status={task.status}")
+    elif task.task_type == "chunked_upload":
+        # Chunked upload task - return upload progress or result
+        if task.status == "processing":
+            # Upload in progress - return progress from extra_data
+            extra_data = task.extra_data or {}
+            total_bytes = extra_data.get("file_size", 0)
+            uploaded_bytes = extra_data.get("uploaded_bytes", 0)
+            progress_percentage = round((uploaded_bytes / total_bytes) * 100, 2) if total_bytes > 0 else 0.0
+
+            response_data["result"] = {
+                "filename": extra_data.get("filename", ""),
+                "file_size": total_bytes,
+                "uploaded_bytes": uploaded_bytes,
+                "uploaded_chunks": extra_data.get("uploaded_chunks", 0),
+                "total_chunks": extra_data.get("total_chunks", 0),
+                "progress_percentage": progress_percentage,
+            }
+
+        elif task.status == "finalizing":
+            # Parsing FCS file
+            response_data["result"] = {
+                "message": "Parsing FCS file...",
+                "filename": task.extra_data.get("filename", "") if task.extra_data else "",
+            }
+
+        elif task.status == "completed":
+            # Upload completed - return FCSFile info
+            response_data["completed_at"] = task.completed_at.isoformat()
+            if task.result:
+                response_data["result"] = task.result  # {file_id, filename, total_events, total_parameters}
+            elif task.fcs_file:
+                # Fallback: get from FCSFile relation
+                response_data["result"] = {
+                    "file_id": task.fcs_file.file_id,
+                    "filename": task.fcs_file.filename,
+                    "total_events": task.fcs_file.total_events,
+                    "total_parameters": task.fcs_file.total_parameters,
+                }
+
+        elif task.status == "failed":
+            # Upload failed
+            response_data["completed_at"] = task.completed_at.isoformat() if task.completed_at else None
+            response_data["result"] = task.result or {"error_message": "Upload failed"}
+
+    logger.info(f"Task status requested: task_id={task_id}, task_type={task.task_type}, status={task.status}")
 
     return APIResponse(success=True, data=response_data)

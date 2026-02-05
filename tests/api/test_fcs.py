@@ -620,52 +620,100 @@ def test_fcs_events_negative_offset(client):
 
 
 def test_fcs_upload_success_with_valid_fcs_file(client):
-    """Test successful FCS file upload with fcs:write scope."""
+    """Test successful FCS file upload with chunked upload flow (fcs:write scope)."""
     import os
+    import time
+    from io import BytesIO
 
     jwt = _get_jwt(client)
     pat = _create_pat(client, jwt, ["fcs:write"])
+    pat_analyze = _create_pat(client, jwt, ["fcs:analyze"], name="Analyze Token")
 
-    # Read sample FCS file
+    # Read sample FCS file to get its size
     sample_fcs_path = "app/data/sample.fcs"
-    with open(sample_fcs_path, "rb") as f:
-        files = {"file": ("sample.fcs", f, "application/octet-stream")}
-        data = {"is_public": True}
+    file_size = os.path.getsize(sample_fcs_path)
+    chunk_size = 5 * 1024 * 1024  # 5MB chunks
 
-        response = client.post(
-            URLs.FCS_UPLOAD,
-            headers={"Authorization": f"Bearer {pat}"},
-            files=files,
-            data=data,
+    # 1. Initialize chunked upload
+    init_response = client.post(
+        URLs.FCS_UPLOAD,
+        headers={"Authorization": f"Bearer {pat}"},
+        data={
+            "filename": "sample.fcs",
+            "file_size": file_size,
+            "chunk_size": chunk_size,
+            "is_public": True,
+        },
+    )
+
+    assert init_response.status_code == 201
+    init_data = init_response.json()["data"]
+    task_id = init_data["task_id"]
+    total_chunks = init_data["total_chunks"]
+
+    # 2. Upload all chunks
+    with open(sample_fcs_path, "rb") as f:
+        for chunk_num in range(total_chunks):
+            chunk_data = f.read(chunk_size)
+            chunk_file = BytesIO(chunk_data)
+
+            response = client.post(
+                "/api/v1/fcs/upload/chunk",
+                headers={"Authorization": f"Bearer {pat}"},
+                data={
+                    "task_id": task_id,
+                    "chunk_number": chunk_num,
+                },
+                files={"chunk": (f"chunk_{chunk_num}.dat", chunk_file, "application/octet-stream")},
+            )
+
+            assert response.status_code == 202
+
+    # 3. The upload should auto-complete, check task status
+    # Poll for completion (with timeout)
+    max_wait = 10  # seconds
+    start = time.time()
+
+    while time.time() - start < max_wait:
+        status_response = client.get(
+            f"/api/v1/fcs/tasks/{task_id}",
+            headers={"Authorization": f"Bearer {pat_analyze}"},
         )
 
-    assert response.status_code == 201
-    resp = response.json()
-    assert resp["success"] is True
-    data = resp["data"]
-    assert "file_id" in data
-    assert data["filename"] == "sample.fcs"
-    assert data["total_events"] == 34297
-    assert data["total_parameters"] == 26
-    assert data["file_size"] > 0
+        assert status_response.status_code == 200
+        status_data = status_response.json()["data"]
+
+        if status_data["status"] == "completed":
+            # Verify the result
+            assert "result" in status_data
+            result = status_data["result"]
+            assert "file_id" in result
+            assert result["filename"] == "sample.fcs"
+            assert result["total_events"] == 34297
+            assert result["total_parameters"] == 26
+            break
+
+        time.sleep(0.5)
+    else:
+        pytest.fail("Upload did not complete within timeout period")
 
 
 def test_fcs_upload_forbidden_without_fcs_write_scope(client):
-    """Test 403 when trying to upload without fcs:write scope."""
+    """Test 403 when trying to initialize upload without fcs:write scope."""
     jwt = _get_jwt(client)
     pat = _create_pat(client, jwt, ["fcs:read"])
 
-    sample_fcs_path = "app/data/sample.fcs"
-    with open(sample_fcs_path, "rb") as f:
-        files = {"file": ("sample.fcs", f, "application/octet-stream")}
-        data = {"is_public": True}
-
-        response = client.post(
-            URLs.FCS_UPLOAD,
-            headers={"Authorization": f"Bearer {pat}"},
-            files=files,
-            data=data,
-        )
+    # Try to initialize chunked upload without fcs:write scope
+    response = client.post(
+        URLs.FCS_UPLOAD,
+        headers={"Authorization": f"Bearer {pat}"},
+        data={
+            "filename": "sample.fcs",
+            "file_size": 1048576,
+            "chunk_size": 524288,
+            "is_public": True,
+        },
+    )
 
     assert response.status_code == 403
 
@@ -675,15 +723,16 @@ def test_fcs_upload_rejects_non_fcs_file(client):
     jwt = _get_jwt(client)
     pat = _create_pat(client, jwt, ["fcs:write"])
 
-    # Create a fake file with wrong extension
-    files = {"file": ("test.txt", b"fake content", "text/plain")}
-    data = {"is_public": True}
-
+    # Try to initialize upload with wrong extension
     response = client.post(
         URLs.FCS_UPLOAD,
         headers={"Authorization": f"Bearer {pat}"},
-        files=files,
-        data=data,
+        data={
+            "filename": "test.txt",  # Wrong extension
+            "file_size": 100,
+            "chunk_size": 5242880,
+            "is_public": True,
+        },
     )
 
     assert response.status_code == 400

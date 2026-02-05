@@ -20,6 +20,13 @@ class Settings(BaseSettings):
         "application/fcs",
     ]
 
+    # Chunked upload settings
+    DEFAULT_CHUNK_SIZE_MB: int = 5  # 5MB default
+    MIN_CHUNK_SIZE_MB: int = 1
+    MAX_CHUNK_SIZE_MB: int = 10
+    CHUNKED_UPLOAD_EXPIRY_HOURS: int = 24
+    CHUNKED_UPLOAD_THRESHOLD_MB: int = 50  # Recommend chunked for files > 50MB
+
     # Rate limiting settings
     RATE_LIMIT_ENABLED: bool = True
     RATE_LIMIT_MAX_REQUESTS: int = 60
