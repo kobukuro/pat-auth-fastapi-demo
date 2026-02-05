@@ -861,7 +861,11 @@ def test_get_token_logs_entries_structure(client, db):
     assert "endpoint" in log
     assert "status_code" in log
     assert "authorized" in log
-    assert "reason" in log  # Can be None
+    # reason field only present for unauthorized requests
+    if log["authorized"]:
+        assert "reason" not in log
+    else:
+        assert "reason" in log
 
 
 def test_get_token_logs_ordered_by_timestamp(client, db):
@@ -911,3 +915,132 @@ def test_get_token_logs_ordered_by_timestamp(client, db):
     # Should be ordered by timestamp descending (newest first)
     timestamps = [log["timestamp"] for log in logs]
     assert timestamps == sorted(timestamps, reverse=True)
+
+
+def test_get_token_logs_authorized_no_reason_field(client, db):
+    """Test that authorized (successful) requests don't include reason field in response."""
+    jwt = _get_jwt(client)
+
+    # Create a token
+    create_response = client.post(
+        URLs.TOKENS,
+        headers={"Authorization": f"Bearer {jwt}"},
+        json={
+            "name": "Test Token",
+            "scopes": ["fcs:read"],
+            "expires_in_days": 30,
+        },
+    )
+    token_id = create_response.json()["data"]["id"]
+
+    # Create audit log entry for authorized request
+    log_entry = PersonalAccessTokenAuditLog(
+        token_id=token_id,
+        timestamp=datetime.now(timezone.utc),
+        ip_address="127.0.0.1",
+        method="GET",
+        endpoint="/api/v1/fcs/data",
+        status_code=200,
+        authorized=True,
+        reason=None,  # Authorized requests have no reason
+    )
+    db.add(log_entry)
+    db.commit()
+
+    # Get the logs
+    response = client.get(
+        f"{URLs.TOKENS}/{token_id}/logs",
+        headers={"Authorization": f"Bearer {jwt}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    logs = data["data"]["logs"]
+
+    assert len(logs) == 1
+    log = logs[0]
+
+    # Verify the log entry
+    assert log["authorized"] is True
+    assert log["status_code"] == 200
+    assert log["method"] == "GET"
+    assert log["endpoint"] == "/api/v1/fcs/data"
+
+    # Verify reason field is NOT present for authorized requests
+    assert "reason" not in log
+
+
+def test_get_token_logs_unauthorized_includes_reason_field(client, db):
+    """Test that unauthorized (failed) requests include reason field in response."""
+    import time
+
+    jwt = _get_jwt(client)
+
+    # Create a token
+    create_response = client.post(
+        URLs.TOKENS,
+        headers={"Authorization": f"Bearer {jwt}"},
+        json={
+            "name": "Test Token",
+            "scopes": ["fcs:read"],
+            "expires_in_days": 30,
+        },
+    )
+    token_id = create_response.json()["data"]["id"]
+
+    # Create audit log entry for unauthorized request (expired token)
+    log_entry = PersonalAccessTokenAuditLog(
+        token_id=token_id,
+        timestamp=datetime.now(timezone.utc),
+        ip_address="192.168.1.100",
+        method="GET",
+        endpoint="/api/v1/fcs/data",
+        status_code=401,
+        authorized=False,
+        reason="Token has expired",
+    )
+    db.add(log_entry)
+    db.commit()
+    time.sleep(0.01)  # Ensure different timestamps
+
+    # Create another audit log entry for revoked token
+    log_entry2 = PersonalAccessTokenAuditLog(
+        token_id=token_id,
+        timestamp=datetime.now(timezone.utc),
+        ip_address="192.168.1.101",
+        method="POST",
+        endpoint="/api/v1/fcs/data",
+        status_code=401,
+        authorized=False,
+        reason="Token has been revoked",
+    )
+    db.add(log_entry2)
+    db.commit()
+
+    # Get the logs
+    response = client.get(
+        f"{URLs.TOKENS}/{token_id}/logs",
+        headers={"Authorization": f"Bearer {jwt}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    logs = data["data"]["logs"]
+
+    assert len(logs) == 2
+
+    # Verify first log entry (revoked - newest first)
+    log1 = logs[0]
+    assert log1["authorized"] is False
+    assert log1["status_code"] == 401
+    assert log1["method"] == "POST"
+    assert "reason" in log1
+    assert log1["reason"] == "Token has been revoked"
+
+    # Verify second log entry (expired)
+    log2 = logs[1]
+    assert log2["authorized"] is False
+    assert log2["status_code"] == 401
+    assert log2["method"] == "GET"
+    assert "reason" in log2
+    assert log2["reason"] == "Token has expired"

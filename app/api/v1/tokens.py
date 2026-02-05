@@ -164,18 +164,20 @@ def get_token_logs(
     logs = db.execute(logs_stmt).scalars().all()
 
     # Convert to response format
-    log_entries = [
-        AuditLogEntry(
-            timestamp=log.timestamp,
-            ip_address=log.ip_address,
-            method=log.method,
-            endpoint=log.endpoint,
-            status_code=log.status_code,
-            authorized=log.authorized,
-            reason=log.reason,
-        )
-        for log in logs
-    ]
+    log_entries = []
+    for log in logs:
+        entry_data = {
+            "timestamp": log.timestamp,
+            "ip_address": log.ip_address,
+            "method": log.method,
+            "endpoint": log.endpoint,
+            "status_code": log.status_code,
+            "authorized": log.authorized,
+        }
+        # Only include reason for unauthorized requests
+        if not log.authorized:
+            entry_data["reason"] = log.reason
+        log_entries.append(AuditLogEntry(**entry_data))
 
     return APIResponse(
         success=True,
