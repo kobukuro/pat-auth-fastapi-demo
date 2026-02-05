@@ -7,6 +7,7 @@ from sqlalchemy import select
 from app.database import SessionLocal
 from app.models.audit_log import PersonalAccessTokenAuditLog
 from app.models.pat import PersonalAccessToken
+from app.utils.datetime import ensure_aware
 
 
 async def audit_pat_middleware(request: Request, call_next):
@@ -64,7 +65,7 @@ async def audit_pat_middleware(request: Request, call_next):
 
                 if pat.is_revoked:
                     reason = "Token has been revoked"
-                elif pat.expires_at < datetime.now(timezone.utc):
+                elif ensure_aware(pat.expires_at) < datetime.now(timezone.utc):
                     reason = "Token has expired"
                 else:
                     authorized = True
