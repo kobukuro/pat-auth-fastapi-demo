@@ -96,8 +96,10 @@ def test_upload_chunk(client, auth_pat):
     )
     task_id = init_response.json()["data"]["task_id"]
 
-    # Upload chunk 0
-    chunk_data = b"x" * 5242880  # 5MB
+    # Upload chunk 0 - use real FCS header + padding to pass validation
+    # FCS files must start with "FCS" magic number
+    fcs_header = b"FCS3.0         256  "
+    chunk_data = fcs_header + b"x" * (5242880 - len(fcs_header))  # Pad to 5MB
 
     response = client.post(
         "/api/v1/fcs/upload/chunk",
@@ -217,3 +219,71 @@ def test_chunk_calculation(client, auth_pat, file_size, chunk_size, total_chunks
     assert response.status_code == 201
     data = response.json()
     assert data["data"]["total_chunks"] == expected_chunks
+
+
+def test_upload_invalid_fcs_file_rejected_on_first_chunk(client, auth_pat):
+    """Test that non-FCS files are rejected on first chunk upload."""
+    # Init session - use .fcs extension to pass init validation
+    init_response = client.post(
+        "/api/v1/fcs/upload",
+        headers={"Authorization": f"Bearer {auth_pat}"},
+        data={
+            "filename": "invalid.fcs",  # Use .fcs extension
+            "file_size": 5242880,
+            "chunk_size": 5242880,
+            "is_public": True,
+        },
+    )
+    task_id = init_response.json()["data"]["task_id"]
+
+    # Upload invalid first chunk (not FCS format - doesn't start with "FCS")
+    chunk_data = b"\xe0\xe0\xe0" + b"x" * 5242877  # Starts with invalid bytes
+
+    response = client.post(
+        "/api/v1/fcs/upload/chunk",
+        headers={"Authorization": f"Bearer {auth_pat}"},
+        data={
+            "task_id": task_id,
+            "chunk_number": 0,
+        },
+        files={"chunk": ("chunk_0.dat", BytesIO(chunk_data), "application/octet-stream")},
+    )
+
+    # Should return 400 with safe error message (no internal details)
+    assert response.status_code == 400
+    data = response.json()
+    assert data["success"] is False
+    assert data["message"] == "Invalid FCS file format"  # Generic message, no internal details leaked
+
+
+def test_upload_valid_fcs_file_accepted(client, auth_pat):
+    """Test that valid FCS files are accepted."""
+    # Init session
+    init_response = client.post(
+        "/api/v1/fcs/upload",
+        headers={"Authorization": f"Bearer {auth_pat}"},
+        data={
+            "filename": "sample.fcs",
+            "file_size": 5242880,
+            "chunk_size": 5242880,
+            "is_public": True,
+        },
+    )
+    task_id = init_response.json()["data"]["task_id"]
+
+    # Read real FCS file header for first chunk
+    with open("app/data/sample.fcs", "rb") as f:
+        chunk_data = f.read(5242880)
+
+    response = client.post(
+        "/api/v1/fcs/upload/chunk",
+        headers={"Authorization": f"Bearer {auth_pat}"},
+        data={
+            "task_id": task_id,
+            "chunk_number": 0,
+        },
+        files={"chunk": ("chunk_0.dat", BytesIO(chunk_data), "application/octet-stream")},
+    )
+
+    # Should return 202 (accepted)
+    assert response.status_code == 202

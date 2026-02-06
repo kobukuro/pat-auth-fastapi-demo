@@ -388,7 +388,7 @@ async def init_chunked_upload(
     except Exception as e:
         logger.error(f"Failed to init chunked upload: {str(e)}", exc_info=True)
         task.status = "failed"
-        task.result = {"error_message": str(e)}
+        task.result = {"error_message": "Failed to initialize upload"}
         db.commit()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -514,6 +514,24 @@ async def upload_chunk(
     # 5. Read chunk data
     chunk_data = await chunk.read()
 
+    # 5.5. Validate FCS format on first chunk
+    if chunk_number == 0:
+        from app.services.fcs import validate_fcs_header
+        try:
+            validate_fcs_header(chunk_data)
+        except ValueError as e:
+            # Log detailed error with stack trace for debugging
+            logger.error(f"Invalid FCS file uploaded: {str(e)}", exc_info=True)
+            # Return safe, static message to client (no internal details exposed)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "success": False,
+                    "error": "Bad Request",
+                    "message": "Invalid FCS file format",
+                },
+            )
+
     # 6. Save chunk
     try:
         bytes_written = await storage.save_chunk(
@@ -537,7 +555,7 @@ async def upload_chunk(
     except Exception as e:
         logger.error(f"Failed to save chunk {chunk_number}: {str(e)}", exc_info=True)
         task.status = "failed"
-        task.result = {"error_message": str(e)}
+        task.result = {"error_message": "Failed to save chunk"}
         db.commit()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

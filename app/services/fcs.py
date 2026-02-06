@@ -43,6 +43,31 @@ class FCSEventsData:
     events: list[dict[str, float | int]]
 
 
+def validate_fcs_header(chunk_data: bytes) -> bool:
+    """
+    Validate that data starts with FCS magic number.
+
+    Args:
+        chunk_data: File data to validate (should be at least 3 bytes)
+
+    Returns:
+        True if valid FCS header
+
+    Raises:
+        ValueError: If data doesn't start with "FCS" magic number
+    """
+    if len(chunk_data) < 3:
+        raise ValueError("Chunk too small to validate FCS format")
+
+    if chunk_data[:3] != b"FCS":
+        raise ValueError(
+            f"Invalid FCS file format: file must start with 'FCS' magic number. "
+            f"Got: {chunk_data[:10]!r}"
+        )
+
+    return True
+
+
 def get_sample_fcs_path() -> str:
     """
     Return the sample FCS file path.
