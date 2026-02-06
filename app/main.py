@@ -34,7 +34,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         status_code=exc.status_code,
         content={
             "success": False,
-            "error": "Error",
+            "error": "Unauthorized" if exc.status_code == 401 else "Error",
             "message": content
         }
     )
