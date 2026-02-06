@@ -6,16 +6,18 @@ including parameter retrieval, events query, file upload, and statistics calcula
 """
 import time
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, Request, UploadFile, status
 
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import SessionLocal, get_db
-from app.dependencies.pat import AuthContext, require_scope
+from app.dependencies.pat import AuthContext, get_pat_with_scopes, require_scope
 from app.dependencies.storage import get_storage
 from app.logging_config import setup_logging
 from app.models.fcs_file import FCSFile
+from app.models.pat import PersonalAccessToken
+from app.models.scope import Scope
 from app.models.fcs_statistics import FCSStatistics
 from app.schemas.common import APIResponse
 from app.schemas.fcs import (
@@ -35,6 +37,7 @@ from app.services.fcs import (
     get_sample_fcs_path,
 )
 from app.storage.base import StorageBackend
+from app.utils.authorization import check_permission_and_get_context
 from app.utils.ids import generate_short_id
 
 router = APIRouter(prefix="/fcs", tags=["fcs"])
@@ -936,7 +939,8 @@ async def trigger_statistics_calculation(
 )
 async def get_task_status_endpoint(
     task_id: int,
-    auth: AuthContext = Depends(require_scope("fcs:analyze")),
+    request: Request,
+    pat_data: tuple[PersonalAccessToken, list[Scope]] = Depends(get_pat_with_scopes),
     db: Session = Depends(get_db),
 ):
     """
@@ -945,11 +949,14 @@ async def get_task_status_endpoint(
     Returns the current status of a background task (statistics or chunked upload),
     along with the result if completed.
 
-    **Scope required:** `fcs:analyze` (statistics) or `fcs:read` (chunked upload)
+    **Dynamic Scope required:**
+    - "chunked_upload" tasks: `fcs:write` scope
+    - "statistics" tasks: `fcs:analyze` scope
 
     Args:
         task_id: Task ID (auto-increment integer)
-        auth: AuthContext containing PAT and user info
+        request: FastAPI Request object (for dynamic endpoint/method detection)
+        pat_data: Tuple of (PAT, scopes) from authentication
         db: Database session
 
     Returns:
@@ -964,11 +971,13 @@ async def get_task_status_endpoint(
 
     Raises:
         HTTPException 404: If task not found
-        HTTPException 403: If user doesn't own the task
+        HTTPException 403: If user doesn't own the task or lacks required scope
     """
     from app.models.background_task import BackgroundTask
 
-    # 1. Get task
+    pat, scopes = pat_data
+
+    # 1. Get task first (need task_type to determine required scope)
     task = db.query(BackgroundTask).filter_by(id=task_id).first()
 
     if not task:
@@ -982,10 +991,31 @@ async def get_task_status_endpoint(
             },
         )
 
-    # 2. Permission check: only task owner can view
-    if task.user_id != auth.pat.user_id:
+    # 2. Determine required scope based on task_type
+    # Dynamic permission: upload tasks need fcs:write, statistics need fcs:analyze
+    if task.task_type == "chunked_upload":
+        required_scope = "fcs:write"
+    elif task.task_type == "statistics":
+        required_scope = "fcs:analyze"
+    else:
+        # Unknown task type - use highest level for safety
+        required_scope = "fcs:analyze"
+        logger.warning(f"Unknown task_type '{task.task_type}' for task {task_id}, using fcs:analyze")
+
+    # 3. Check if user has the required scope for this task type
+    check_permission_and_get_context(
+        db=db,
+        pat=pat,
+        scopes=scopes,
+        required_scope=required_scope,
+        endpoint=request.url.path,
+        method=request.method,
+    )
+
+    # 4. Ownership check: only task owner can view
+    if task.user_id != pat.user_id:
         logger.warning(
-            f"Unauthorized access to task {task_id} by user {auth.pat.user_id}, owner: {task.user_id}"
+            f"Unauthorized access to task {task_id} by user {pat.user_id}, owner: {task.user_id}"
         )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
