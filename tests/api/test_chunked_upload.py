@@ -258,22 +258,23 @@ def test_upload_invalid_fcs_file_rejected_on_first_chunk(client, auth_pat):
 
 def test_upload_valid_fcs_file_accepted(client, auth_pat):
     """Test that valid FCS files are accepted."""
+    # Read real FCS file to get actual size
+    with open("app/data/sample.fcs", "rb") as f:
+        chunk_data = f.read()
+    file_size = len(chunk_data)
+
     # Init session
     init_response = client.post(
         "/api/v1/fcs/upload",
         headers={"Authorization": f"Bearer {auth_pat}"},
         data={
             "filename": "sample.fcs",
-            "file_size": 5242880,
-            "chunk_size": 5242880,
+            "file_size": file_size,
+            "chunk_size": file_size,  # Upload as single chunk
             "is_public": True,
         },
     )
     task_id = init_response.json()["data"]["task_id"]
-
-    # Read real FCS file header for first chunk
-    with open("app/data/sample.fcs", "rb") as f:
-        chunk_data = f.read(5242880)
 
     response = client.post(
         "/api/v1/fcs/upload/chunk",
