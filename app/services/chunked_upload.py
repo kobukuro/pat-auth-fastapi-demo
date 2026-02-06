@@ -113,6 +113,9 @@ async def finalize_chunked_upload(
 
         # 6. Create FCSFile record
         try:
+            # Get accumulated upload time from extra_data
+            accumulated_upload_ms = extra_data.get("accumulated_upload_ms", 0)
+
             fcs_file = FCSFile(
                 file_id=file_id,
                 filename=extra_data.get("filename", "unknown.fcs"),
@@ -121,7 +124,7 @@ async def finalize_chunked_upload(
                 total_events=params_data.total_events,
                 total_parameters=params_data.total_parameters,
                 is_public=True,  # Default to public, can be stored in extra_data in future
-                upload_duration_ms=None,  # Not tracked for chunked uploads
+                upload_duration_ms=accumulated_upload_ms,  # Store accumulated upload time
                 user_id=task.user_id,
             )
             db.add(fcs_file)

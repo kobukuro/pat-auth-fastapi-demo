@@ -142,6 +142,9 @@ class FCSFileResponse(BaseModel):
     total_parameters: int
     """Total number of parameters."""
 
+    upload_duration_ms: int | None = None
+    """Total upload duration in milliseconds (actual transfer time, excluding wait times between chunks)."""
+
 
 # Statistics schemas
 
