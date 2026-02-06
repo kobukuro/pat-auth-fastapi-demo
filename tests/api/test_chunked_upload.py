@@ -48,7 +48,7 @@ def auth_pat(client):
 
 @pytest.fixture
 def auth_pat_analyze(client):
-    """Create and return a PAT with fcs:analyze scope for testing task status."""
+    """Create and return a PAT with fcs:analyze scope for testing statistics tasks."""
     jwt = _get_jwt(client, email="user1@example.com")
     return _create_pat(client, jwt, ["fcs:analyze"], name="User1 Analyze Token")
 
@@ -115,7 +115,7 @@ def test_upload_chunk(client, auth_pat):
     assert data["data"]["progress_percentage"] == 50.0
 
 
-def test_get_upload_status(client, auth_pat, auth_pat_analyze):
+def test_get_upload_status(client, auth_pat):
     """Test getting upload status (US-MVP-003)."""
     # Init session
     init_response = client.post(
@@ -130,10 +130,10 @@ def test_get_upload_status(client, auth_pat, auth_pat_analyze):
     )
     task_id = init_response.json()["data"]["task_id"]
 
-    # Get status (needs fcs:analyze scope)
+    # Get status (chunked_upload tasks need fcs:write scope)
     response = client.get(
         f"/api/v1/fcs/tasks/{task_id}",
-        headers={"Authorization": f"Bearer {auth_pat_analyze}"},
+        headers={"Authorization": f"Bearer {auth_pat}"},
     )
 
     assert response.status_code == 200

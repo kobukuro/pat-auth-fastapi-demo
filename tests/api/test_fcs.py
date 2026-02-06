@@ -870,3 +870,124 @@ def test_fcs_analyze_grants_statistics_access(client):
     )
 
     assert response.status_code == 202
+
+
+# ========================================
+# Dynamic Scope Tests for Task Status
+# ========================================
+
+
+def test_task_status_chunked_upload_requires_fcs_write(client, db):
+    """Test that chunked_upload tasks require fcs:write scope."""
+    jwt = _get_jwt(client)
+
+    # Create PATs with different scopes
+    pat_read = _create_pat(client, jwt, ["fcs:read"], name="Read Token")
+    pat_write = _create_pat(client, jwt, ["fcs:write"], name="Write Token")
+
+    # Create a chunked_upload task via API
+    init_response = client.post(
+        URLs.FCS_UPLOAD,
+        headers={"Authorization": f"Bearer {pat_write}"},
+        data={
+            "filename": "test.fcs",
+            "file_size": 10485760,
+            "chunk_size": 5242880,
+            "is_public": True,
+        },
+    )
+    task_id = init_response.json()["data"]["task_id"]
+
+    # Test with fcs:read (should fail)
+    response = client.get(
+        URLs.FCS_TASKS.format(task_id),
+        headers={"Authorization": f"Bearer {pat_read}"},
+    )
+    assert response.status_code == 403
+    data = response.json()
+    assert data["data"]["required_scope"] == "fcs:write"
+
+    # Test with fcs:write (should succeed)
+    response = client.get(
+        URLs.FCS_TASKS.format(task_id),
+        headers={"Authorization": f"Bearer {pat_write}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["task_type"] == "chunked_upload"
+
+
+def test_task_status_statistics_requires_fcs_analyze(client, db):
+    """Test that statistics tasks require fcs:analyze scope."""
+    jwt = _get_jwt(client)
+
+    # Create PATs with different scopes
+    pat_write = _create_pat(client, jwt, ["fcs:write"], name="Write Token")
+    pat_analyze = _create_pat(client, jwt, ["fcs:analyze"], name="Analyze Token")
+
+    # Create a statistics task via API
+    calc_response = client.post(
+        URLs.FCS_STATISTICS_CALCULATE,
+        headers={"Authorization": f"Bearer {pat_analyze}"},
+        json={},  # Empty body = sample file
+    )
+    task_id = calc_response.json()["data"]["task_id"]
+
+    # Test with fcs:write (should fail - write < analyze)
+    response = client.get(
+        URLs.FCS_TASKS.format(task_id),
+        headers={"Authorization": f"Bearer {pat_write}"},
+    )
+    assert response.status_code == 403
+    data = response.json()
+    assert data["data"]["required_scope"] == "fcs:analyze"
+
+    # Test with fcs:analyze (should succeed)
+    response = client.get(
+        URLs.FCS_TASKS.format(task_id),
+        headers={"Authorization": f"Bearer {pat_analyze}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["task_type"] == "statistics"
+
+
+def test_task_status_scope_inheritance_works(client, db):
+    """Test that higher scopes grant access (analyze grants write access)."""
+    jwt = _get_jwt(client)
+
+    # Create PAT with fcs:analyze
+    pat_analyze = _create_pat(client, jwt, ["fcs:analyze"], name="Analyze Token")
+
+    # Create chunked_upload task via API
+    upload_response = client.post(
+        URLs.FCS_UPLOAD,
+        headers={"Authorization": f"Bearer {pat_analyze}"},
+        data={
+            "filename": "test.fcs",
+            "file_size": 10485760,
+            "chunk_size": 5242880,
+            "is_public": True,
+        },
+    )
+    upload_task_id = upload_response.json()["data"]["task_id"]
+
+    # Create statistics task via API
+    stats_response = client.post(
+        URLs.FCS_STATISTICS_CALCULATE,
+        headers={"Authorization": f"Bearer {pat_analyze}"},
+        json={},
+    )
+    stats_task_id = stats_response.json()["data"]["task_id"]
+
+    # fcs:analyze should grant access to both
+    response1 = client.get(
+        URLs.FCS_TASKS.format(upload_task_id),
+        headers={"Authorization": f"Bearer {pat_analyze}"},
+    )
+    assert response1.status_code == 200
+
+    response2 = client.get(
+        URLs.FCS_TASKS.format(stats_task_id),
+        headers={"Authorization": f"Bearer {pat_analyze}"},
+    )
+    assert response2.status_code == 200
+
