@@ -243,6 +243,7 @@ class LocalStorageBackend(StorageBackend):
         session_id: str,
         chunk_number: int,
         chunk_data: bytes,
+        chunk_size: int,
     ) -> int:
         """
         Save chunk at specific offset in temporary file.
@@ -251,18 +252,24 @@ class LocalStorageBackend(StorageBackend):
             session_id: Upload session identifier (task_id)
             chunk_number: Chunk sequence number (0-based)
             chunk_data: Chunk bytes to write
+            chunk_size: Expected chunk size for offset calculation
 
         Returns:
             Number of bytes written
 
         Raises:
             FileNotFoundError: If temporary file not found
+            ValueError: If chunk size exceeds expected chunk_size
             StorageError: If write operation fails
         """
-        # Calculate offset: chunk_number * chunk_size
-        # We need to get chunk_size from the file size (simplified approach)
-        # In production, chunk_size should be stored in session metadata
-        offset = chunk_number * len(chunk_data)
+        # Validate chunk size - should not exceed chunk_size
+        if len(chunk_data) > chunk_size:
+            raise ValueError(
+                f"Chunk {chunk_number} size {len(chunk_data)} exceeds chunk_size {chunk_size}"
+            )
+
+        # Calculate offset using the configured chunk_size (not len(chunk_data))
+        offset = chunk_number * chunk_size
 
         temp_path = self._get_temp_file_path(session_id, "")
 

@@ -1260,3 +1260,252 @@ def test_private_file_access_control_statistics_endpoint(client, db):
     assert response.status_code == 403
     assert "Private file - access denied" in response.json()["message"]
 
+
+# ========================================
+# Chunk Size Validation Tests
+# ========================================
+
+
+def test_chunk_oversized_rejected(client, db):
+    """Test that oversized chunks are rejected with 400 error."""
+    from app.models.background_task import BackgroundTask
+
+    jwt = _get_jwt(client)
+    pat_write = _create_pat(client, jwt, ["fcs:write"])
+
+    # Initialize upload with 1MB chunk_size
+    file_size = 3 * 1024 * 1024  # 3MB
+    chunk_size = 1 * 1024 * 1024  # 1MB
+
+    init_response = client.post(
+        URLs.FCS_UPLOAD,
+        headers={"Authorization": f"Bearer {pat_write}"},
+        data={
+            "filename": "test.fcs",
+            "file_size": file_size,
+            "chunk_size": chunk_size,
+            "is_public": True,
+        },
+    )
+    assert init_response.status_code == 201
+    task_id = init_response.json()["data"]["task_id"]
+
+    # Create oversized chunk (2MB instead of 1MB)
+    oversized_chunk = b"FCS" + b"\x00" * 10 + b"\x00\x00\x00\x00" + b"x" * (2 * 1024 * 1024 - 18)
+
+    from io import BytesIO
+
+    chunk_file = BytesIO(oversized_chunk)
+
+    response = client.post(
+        URLs.FCS_UPLOAD_CHUNK,
+        headers={"Authorization": f"Bearer {pat_write}"},
+        data={
+            "task_id": task_id,
+            "chunk_number": 0,
+        },
+        files={"chunk": ("chunk.fcs", chunk_file, "application/octet-stream")},
+    )
+
+    # Debug: print response if test fails
+    if response.status_code != 400:
+        print(f"Response status: {response.status_code}")
+        print(f"Response data: {response.json()}")
+
+    assert response.status_code == 400
+    data = response.json()
+    assert data["success"] is False
+    assert "size mismatch" in data["message"].lower()
+    assert f"Expected {chunk_size}" in data["message"]
+
+
+def test_chunk_undersized_rejected(client, db):
+    """Test that undersized chunks are rejected (except last chunk)."""
+    from io import BytesIO
+
+    jwt = _get_jwt(client)
+    pat_write = _create_pat(client, jwt, ["fcs:write"])
+
+    # Initialize upload with 1MB chunk_size
+    file_size = 3 * 1024 * 1024  # 3MB (exactly 3 chunks)
+    chunk_size = 1 * 1024 * 1024  # 1MB
+
+    init_response = client.post(
+        URLs.FCS_UPLOAD,
+        headers={"Authorization": f"Bearer {pat_write}"},
+        data={
+            "filename": "test.fcs",
+            "file_size": file_size,
+            "chunk_size": chunk_size,
+            "is_public": True,
+        },
+    )
+    assert init_response.status_code == 201
+    task_id = init_response.json()["data"]["task_id"]
+
+    # Create undersized chunk (500KB instead of 1MB)
+    undersized_chunk = b"FCS" + b"\x00" * 10 + b"\x00\x00\x00\x00" + b"x" * (500 * 1024 - 18)
+    chunk_file = BytesIO(undersized_chunk)
+
+    response = client.post(
+        URLs.FCS_UPLOAD_CHUNK,
+        headers={"Authorization": f"Bearer {pat_write}"},
+        data={
+            "task_id": task_id,
+            "chunk_number": 0,  # First chunk, should be full size
+        },
+        files={"chunk": ("chunk.fcs", chunk_file, "application/octet-stream")},
+    )
+
+    assert response.status_code == 400
+    data = response.json()
+    assert data["success"] is False
+    assert "size mismatch" in data["message"].lower()
+
+
+def test_last_chunk_can_be_smaller(client, db):
+    """Test that the last chunk can be smaller than chunk_size."""
+    from io import BytesIO
+
+    jwt = _get_jwt(client)
+    pat_write = _create_pat(client, jwt, ["fcs:write"])
+
+    # Initialize upload where last chunk is smaller
+    # Use a file_size that will have exactly 3 chunks with the last one smaller
+    file_size = 2 * 1024 * 1024 + 500 * 1024  # 2.5MB
+    chunk_size = 1 * 1024 * 1024  # 1MB
+
+    init_response = client.post(
+        URLs.FCS_UPLOAD,
+        headers={"Authorization": f"Bearer {pat_write}"},
+        data={
+            "filename": "test.fcs",
+            "file_size": file_size,
+            "chunk_size": chunk_size,
+            "is_public": True,
+        },
+    )
+    assert init_response.status_code == 201
+    task_id = init_response.json()["data"]["task_id"]
+    total_chunks = init_response.json()["data"]["total_chunks"]
+
+    assert total_chunks == 3  # 2 full chunks + 1 partial
+
+    # Upload first chunk (full size)
+    chunk_data = b"FCS" + b"\x00" * 100  # Simple FCS header
+    chunk_data += b"x" * (chunk_size - len(chunk_data))
+    chunk_file = BytesIO(chunk_data)
+
+    response = client.post(
+        URLs.FCS_UPLOAD_CHUNK,
+        headers={"Authorization": f"Bearer {pat_write}"},
+        data={
+            "task_id": task_id,
+            "chunk_number": 0,
+        },
+        files={"chunk": ("chunk0.fcs", chunk_file, "application/octet-stream")},
+    )
+    assert response.status_code == 202
+
+    # Upload last chunk (smaller than chunk_size)
+    # Note: We're skipping chunk 1 to avoid triggering auto-completion
+    last_chunk_size = 500 * 1024
+    last_chunk = b"FCS" + b"\x00" * 100
+    last_chunk += b"x" * (last_chunk_size - len(last_chunk))
+    last_chunk_file = BytesIO(last_chunk)
+
+    response = client.post(
+        URLs.FCS_UPLOAD_CHUNK,
+        headers={"Authorization": f"Bearer {pat_write}"},
+        data={
+            "task_id": task_id,
+            "chunk_number": 2,  # Last chunk (skip chunk 1)
+        },
+        files={"chunk": ("chunk2.fcs", last_chunk_file, "application/octet-stream")},
+    )
+
+    assert response.status_code == 202
+    data = response.json()
+    assert data["data"]["uploaded_chunks"] == 2
+    # Verify the smaller chunk was accepted
+
+
+def test_chunk_offset_calculation(client, db):
+    """Test that chunks are written at correct offsets."""
+    import time
+    from app.models.background_task import BackgroundTask
+    from app.storage.local import LocalStorageBackend
+    from app.config import settings
+    from io import BytesIO
+
+    jwt = _get_jwt(client)
+    pat_write = _create_pat(client, jwt, ["fcs:write"])
+
+    # Initialize upload
+    file_size = 3 * 1024 * 1024  # 3MB (3 chunks, we'll only upload 2 to avoid completion)
+    chunk_size = 1 * 1024 * 1024  # 1MB
+
+    init_response = client.post(
+        URLs.FCS_UPLOAD,
+        headers={"Authorization": f"Bearer {pat_write}"},
+        data={
+            "filename": "test.fcs",
+            "file_size": file_size,
+            "chunk_size": chunk_size,
+            "is_public": True,
+        },
+    )
+    assert init_response.status_code == 201
+    task_id = init_response.json()["data"]["task_id"]
+
+    # Create two distinct chunks with different patterns
+    chunk0_data = b"FCS" + b"\x00" * 100 + b"A" * (chunk_size - 103)
+    chunk1_data = b"FCS" + b"\x00" * 100 + b"B" * (chunk_size - 103)
+
+    # Upload chunk 0
+    chunk0_file = BytesIO(chunk0_data)
+    response = client.post(
+        URLs.FCS_UPLOAD_CHUNK,
+        headers={"Authorization": f"Bearer {pat_write}"},
+        data={
+            "task_id": task_id,
+            "chunk_number": 0,
+        },
+        files={"chunk": ("chunk0.fcs", chunk0_file, "application/octet-stream")},
+    )
+    assert response.status_code == 202
+
+    # Upload chunk 1 (skip chunk 2 to avoid auto-completion)
+    chunk1_file = BytesIO(chunk1_data)
+    response = client.post(
+        URLs.FCS_UPLOAD_CHUNK,
+        headers={"Authorization": f"Bearer {pat_write}"},
+        data={
+            "task_id": task_id,
+            "chunk_number": 1,
+        },
+        files={"chunk": ("chunk1.fcs", chunk1_file, "application/octet-stream")},
+    )
+    assert response.status_code == 202
+
+    # Verify offsets by reading temp file
+    storage = LocalStorageBackend(settings.STORAGE_BASE_PATH)
+    temp_path = storage._get_temp_file_path(str(task_id), "")
+
+    import aiofiles
+    import asyncio
+
+    async def verify_offsets():
+        async with aiofiles.open(temp_path, 'rb') as f:
+            # Read first chunk (offset 0)
+            await f.seek(0)
+            chunk0_read = await f.read(chunk_size)
+            assert chunk0_read == chunk0_data, "Chunk 0 data mismatch"
+
+            # Read second chunk (offset chunk_size)
+            await f.seek(chunk_size)
+            chunk1_read = await f.read(chunk_size)
+            assert chunk1_read == chunk1_data, "Chunk 1 data mismatch"
+
+    asyncio.run(verify_offsets())
+

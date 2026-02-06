@@ -515,7 +515,31 @@ async def upload_chunk(
     # 5. Read chunk data
     chunk_data = await chunk.read()
 
-    # 5.5. Validate FCS format on first chunk
+    # 5.5. Validate chunk size
+    chunk_size = task.extra_data.get("chunk_size", 0)
+    total_chunks = task.extra_data.get("total_chunks", 0)
+
+    # Calculate expected size for this chunk
+    # Last chunk may be smaller than chunk_size
+    if chunk_number < total_chunks - 1:
+        expected_size = chunk_size
+    else:
+        # Last chunk
+        file_size = task.extra_data.get("file_size", 0)
+        remaining = file_size % chunk_size
+        expected_size = remaining if remaining != 0 else chunk_size
+
+    if len(chunk_data) != expected_size:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "success": False,
+                "error": "Bad Request",
+                "message": f"Chunk {chunk_number} size mismatch. Expected {expected_size} bytes, got {len(chunk_data)} bytes",
+            },
+        )
+
+    # 5.6. Validate FCS format on first chunk
     if chunk_number == 0:
         from app.services.fcs import validate_fcs_header
         try:
@@ -540,6 +564,7 @@ async def upload_chunk(
             session_id=str(task_id),
             chunk_number=chunk_number,
             chunk_data=chunk_data,
+            chunk_size=chunk_size,
         )
         chunk_upload_time_ms = int((time.time() - start_time) * 1000)
 

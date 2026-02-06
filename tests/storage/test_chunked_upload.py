@@ -40,7 +40,7 @@ async def test_save_chunk(storage):
 
     # Save chunk 0
     chunk_data = b"x" * 512
-    bytes_written = await storage.save_chunk("test_session", 0, chunk_data)
+    bytes_written = await storage.save_chunk("test_session", 0, chunk_data, chunk_size=512)
     assert bytes_written == 512
 
     # Verify file size
@@ -56,10 +56,10 @@ async def test_save_multiple_chunks(storage):
 
     # Save chunks
     chunk_data = b"a" * 256
-    await storage.save_chunk("test_session", 0, chunk_data)
-    await storage.save_chunk("test_session", 1, chunk_data)
-    await storage.save_chunk("test_session", 2, chunk_data)
-    await storage.save_chunk("test_session", 3, chunk_data)
+    await storage.save_chunk("test_session", 0, chunk_data, chunk_size=256)
+    await storage.save_chunk("test_session", 1, chunk_data, chunk_size=256)
+    await storage.save_chunk("test_session", 2, chunk_data, chunk_size=256)
+    await storage.save_chunk("test_session", 3, chunk_data, chunk_size=256)
 
     # Verify
     temp_path = storage._get_temp_file_path("test_session", "")
@@ -73,10 +73,10 @@ async def test_finalize_chunked_upload(storage):
     await storage.init_chunked_upload("test_session", "sample.fcs", 1024, 256)
 
     chunk_data = b"y" * 256
-    await storage.save_chunk("test_session", 0, chunk_data)
-    await storage.save_chunk("test_session", 1, chunk_data)
-    await storage.save_chunk("test_session", 2, chunk_data)
-    await storage.save_chunk("test_session", 3, chunk_data)
+    await storage.save_chunk("test_session", 0, chunk_data, chunk_size=256)
+    await storage.save_chunk("test_session", 1, chunk_data, chunk_size=256)
+    await storage.save_chunk("test_session", 2, chunk_data, chunk_size=256)
+    await storage.save_chunk("test_session", 3, chunk_data, chunk_size=256)
 
     # Finalize
     final_path = await storage.finalize_chunked_upload("test_session", "test_file_id")
@@ -115,9 +115,9 @@ async def test_chunk_write_at_correct_offset(storage):
     chunk2 = b"BBBB" + b"\x00" * 252  # 256 bytes
     chunk3 = b"CCCC" + b"\x00" * 252  # 256 bytes
 
-    await storage.save_chunk("test_session", 0, chunk1)  # Offset 0
-    await storage.save_chunk("test_session", 1, chunk2)  # Offset 256
-    await storage.save_chunk("test_session", 2, chunk3)  # Offset 512
+    await storage.save_chunk("test_session", 0, chunk1, chunk_size=256)  # Offset 0
+    await storage.save_chunk("test_session", 1, chunk2, chunk_size=256)  # Offset 256
+    await storage.save_chunk("test_session", 2, chunk3, chunk_size=256)  # Offset 512
 
     # Read and verify content
     temp_path = storage._get_temp_file_path("test_session", "")
@@ -143,9 +143,9 @@ async def test_multiple_chunks_same_file(storage):
     chunk2 = b"BBB" + b"\x00" * 253  # 256 bytes
     chunk3 = b"CCC" + b"\x00" * 253  # 256 bytes
 
-    await storage.save_chunk("test_session", 0, chunk1)
-    await storage.save_chunk("test_session", 1, chunk2)
-    await storage.save_chunk("test_session", 2, chunk3)
+    await storage.save_chunk("test_session", 0, chunk1, chunk_size=256)
+    await storage.save_chunk("test_session", 1, chunk2, chunk_size=256)
+    await storage.save_chunk("test_session", 2, chunk3, chunk_size=256)
 
     # Finalize and verify
     final_path = await storage.finalize_chunked_upload("test_session", "final_id")
