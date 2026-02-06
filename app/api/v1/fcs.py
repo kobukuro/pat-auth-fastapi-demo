@@ -363,6 +363,7 @@ async def init_chunked_upload(
             "uploaded_chunks": 0,
             "uploaded_bytes": 0,
             "uploaded_chunk_numbers": [],  # Track which chunks have been uploaded
+            "is_public": is_public,
         },
     )
     db.add(task)
