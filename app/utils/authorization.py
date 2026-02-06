@@ -43,7 +43,6 @@ def check_permission_and_get_context(
             detail={
                 "success": False,
                 "error": "Forbidden",
-                "message": f"Scope '{required_scope}' is required for this operation",
                 "data": {
                     "required_scope": required_scope,
                     "your_scopes": [scope.name for scope in scopes],
