@@ -123,7 +123,7 @@ async def finalize_chunked_upload(
                 file_size=extra_data.get("file_size", 0),
                 total_events=params_data.total_events,
                 total_parameters=params_data.total_parameters,
-                is_public=True,  # Default to public, can be stored in extra_data in future
+                is_public=extra_data.get("is_public", True),  # Read from stored data
                 upload_duration_ms=accumulated_upload_ms,  # Store accumulated upload time
                 user_id=task.user_id,
             )

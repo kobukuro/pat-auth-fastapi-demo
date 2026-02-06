@@ -51,6 +51,19 @@ def _create_pat(client, jwt, scopes, expires_in_days=30, name="Test Token") -> s
     return response.json()["data"]["token"]
 
 
+def _get_jwt_with_email(client, email):
+    """Register and login with specific email, return JWT token."""
+    client.post(
+        URLs.REGISTER,
+        json={"email": email, "password": "Password123!"},
+    )
+    response = client.post(
+        URLs.LOGIN,
+        json={"email": email, "password": "Password123!"},
+    )
+    return response.json()["data"]["access_token"]
+
+
 # Success Tests - Sample File Access
 
 
@@ -990,4 +1003,260 @@ def test_task_status_scope_inheritance_works(client, db):
         headers={"Authorization": f"Bearer {pat_analyze}"},
     )
     assert response2.status_code == 200
+
+
+# ========================================
+# Private File Access Control Tests
+# ========================================
+
+
+def _upload_fcs_file_and_wait(client, pat_write, filename, is_public):
+    """Helper to upload FCS file via chunked upload and wait for completion.
+
+    Returns the file_id from the completed upload.
+    """
+    import os
+    import time
+    from io import BytesIO
+
+    sample_fcs_path = "app/data/sample.fcs"
+    file_size = os.path.getsize(sample_fcs_path)
+    chunk_size = 5 * 1024 * 1024  # 5MB
+
+    # 1. Initialize chunked upload
+    init_response = client.post(
+        URLs.FCS_UPLOAD,
+        headers={"Authorization": f"Bearer {pat_write}"},
+        data={
+            "filename": filename,
+            "file_size": file_size,
+            "chunk_size": chunk_size,
+            "is_public": is_public,
+        },
+    )
+
+    assert init_response.status_code == 201
+    init_data = init_response.json()["data"]
+    task_id = init_data["task_id"]
+    total_chunks = init_data["total_chunks"]
+
+    # 2. Upload all chunks
+    with open(sample_fcs_path, "rb") as f:
+        for chunk_num in range(total_chunks):
+            chunk_data = f.read(chunk_size)
+            chunk_file = BytesIO(chunk_data)
+
+            response = client.post(
+                "/api/v1/fcs/upload/chunk",
+                headers={"Authorization": f"Bearer {pat_write}"},
+                data={
+                    "task_id": task_id,
+                    "chunk_number": chunk_num,
+                },
+                files={"chunk": (f"chunk_{chunk_num}.dat", chunk_file, "application/octet-stream")},
+            )
+
+            assert response.status_code == 202
+
+    # 3. Wait for upload completion
+    max_wait = 10  # seconds
+    start = time.time()
+    file_id = None
+
+    while time.time() - start < max_wait:
+        status_response = client.get(
+            f"/api/v1/fcs/tasks/{task_id}",
+            headers={"Authorization": f"Bearer {pat_write}"},
+        )
+
+        assert status_response.status_code == 200
+        status_data = status_response.json()["data"]
+
+        if status_data["status"] == "completed":
+            assert "result" in status_data
+            result = status_data["result"]
+            file_id = result["file_id"]
+            break
+
+        time.sleep(0.5)
+    else:
+        pytest.fail("Upload did not complete within timeout period")
+
+    return file_id
+
+
+def test_public_file_accessible_by_other_user(client):
+    """Public files can be accessed by any user with fcs:read scope."""
+    # User 1: Upload public file
+    jwt1 = _get_jwt_with_email(client, "user1_public@example.com")
+    pat1_write = _create_pat(client, jwt1, ["fcs:write"], name="User1 Write Token")
+    pat1_read = _create_pat(client, jwt1, ["fcs:read"], name="User1 Read Token")
+
+    file_id = _upload_fcs_file_and_wait(client, pat1_write, "public_test.fcs", is_public=True)
+
+    # User 2: Should be able to access the public file
+    jwt2 = _get_jwt_with_email(client, "user2_public@example.com")
+    pat2_read = _create_pat(client, jwt2, ["fcs:read"], name="User2 Read Token")
+
+    response = client.get(
+        f"{URLs.FCS_PARAMETERS}?file_id={file_id}",
+        headers={"Authorization": f"Bearer {pat2_read}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert "data" in data
+
+
+def test_private_file_owner_can_access(client):
+    """Private file owner can access their own files."""
+    # User 1: Upload private file
+    jwt1 = _get_jwt_with_email(client, "user1_private@example.com")
+    pat1_write = _create_pat(client, jwt1, ["fcs:write"], name="User1 Write Token")
+    pat1_read = _create_pat(client, jwt1, ["fcs:read"], name="User1 Read Token")
+
+    file_id = _upload_fcs_file_and_wait(client, pat1_write, "private_test.fcs", is_public=False)
+
+    # User 1 (owner): Should access successfully
+    response = client.get(
+        f"{URLs.FCS_PARAMETERS}?file_id={file_id}",
+        headers={"Authorization": f"Bearer {pat1_read}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert "data" in data
+
+
+def test_private_file_non_owner_denied_403(client):
+    """Non-owners get 403 when accessing private files."""
+    # User 1: Upload private file
+    jwt1 = _get_jwt_with_email(client, "user1_private2@example.com")
+    pat1_write = _create_pat(client, jwt1, ["fcs:write"], name="User1 Write Token")
+
+    file_id = _upload_fcs_file_and_wait(client, pat1_write, "private_test2.fcs", is_public=False)
+
+    # User 2 (non-owner): Should be denied with 403
+    jwt2 = _get_jwt_with_email(client, "user2_private2@example.com")
+    pat2_read = _create_pat(client, jwt2, ["fcs:read"], name="User2 Read Token")
+
+    response = client.get(
+        f"{URLs.FCS_PARAMETERS}?file_id={file_id}",
+        headers={"Authorization": f"Bearer {pat2_read}"},
+    )
+
+    assert response.status_code == 403
+    data = response.json()
+    assert data["success"] is False
+    assert "Private file - access denied" in data["message"]
+
+
+def test_private_file_access_control_parameters_endpoint(client):
+    """Full integration test for parameters endpoint with private file."""
+    # User 1: Upload private file
+    jwt1 = _get_jwt_with_email(client, "user1_params@example.com")
+    pat1_write = _create_pat(client, jwt1, ["fcs:write"], name="User1 Write Token")
+    pat1_read = _create_pat(client, jwt1, ["fcs:read"], name="User1 Read Token")
+
+    file_id = _upload_fcs_file_and_wait(client, pat1_write, "private_params.fcs", is_public=False)
+
+    # User 1 (owner): Should access successfully
+    response = client.get(
+        f"{URLs.FCS_PARAMETERS}?file_id={file_id}",
+        headers={"Authorization": f"Bearer {pat1_read}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["total_parameters"] == 26
+
+    # User 2 (non-owner): Should be denied with 403
+    jwt2 = _get_jwt_with_email(client, "user2_params@example.com")
+    pat2_read = _create_pat(client, jwt2, ["fcs:read"], name="User2 Read Token")
+
+    response = client.get(
+        f"{URLs.FCS_PARAMETERS}?file_id={file_id}",
+        headers={"Authorization": f"Bearer {pat2_read}"},
+    )
+    assert response.status_code == 403
+    assert "Private file - access denied" in response.json()["message"]
+
+
+def test_private_file_access_control_events_endpoint(client):
+    """Full integration test for events endpoint with private file."""
+    # User 1: Upload private file
+    jwt1 = _get_jwt_with_email(client, "user1_events@example.com")
+    pat1_write = _create_pat(client, jwt1, ["fcs:write"], name="User1 Write Token")
+    pat1_read = _create_pat(client, jwt1, ["fcs:read"], name="User1 Read Token")
+
+    file_id = _upload_fcs_file_and_wait(client, pat1_write, "private_events.fcs", is_public=False)
+
+    # User 1 (owner): Should access successfully
+    response = client.get(
+        f"{URLs.FCS_EVENTS}?file_id={file_id}",
+        headers={"Authorization": f"Bearer {pat1_read}"},
+    )
+    assert response.status_code == 200
+    assert len(response.json()["data"]["events"]) > 0
+
+    # User 2 (non-owner): Should be denied with 403
+    jwt2 = _get_jwt_with_email(client, "user2_events@example.com")
+    pat2_read = _create_pat(client, jwt2, ["fcs:read"], name="User2 Read Token")
+
+    response = client.get(
+        f"{URLs.FCS_EVENTS}?file_id={file_id}",
+        headers={"Authorization": f"Bearer {pat2_read}"},
+    )
+    assert response.status_code == 403
+    assert "Private file - access denied" in response.json()["message"]
+
+
+def test_private_file_access_control_statistics_endpoint(client, db):
+    """Full integration test for statistics endpoint with private file."""
+    from app.models.fcs_statistics import FCSStatistics
+    from app.services.fcs_statistics import calculate_fcs_statistics
+
+    # User 1: Upload private file
+    jwt1 = _get_jwt_with_email(client, "user1_stats@example.com")
+    pat1_write = _create_pat(client, jwt1, ["fcs:write"], name="User1 Write Token")
+    pat1_analyze = _create_pat(client, jwt1, ["fcs:analyze"], name="User1 Analyze Token")
+
+    file_id = _upload_fcs_file_and_wait(client, pat1_write, "private_stats.fcs", is_public=False)
+
+    # Manually calculate statistics to populate cache (bypassing background task)
+    from app.models.fcs_file import FCSFile
+
+    fcs_file = db.query(FCSFile).filter(FCSFile.file_id == file_id).first()
+    assert fcs_file is not None
+
+    result = calculate_fcs_statistics(fcs_file.file_path)
+
+    # Populate cache
+    stats_record = FCSStatistics(
+        file_id=file_id,
+        fcs_file_id=fcs_file.id,
+        statistics=result.statistics,
+        total_events=result.total_events,
+    )
+    db.add(stats_record)
+    db.commit()
+
+    # User 1 (owner): Should access statistics successfully
+    response = client.get(
+        f"{URLs.FCS_STATISTICS}?file_id={file_id}",
+        headers={"Authorization": f"Bearer {pat1_analyze}"},
+    )
+    assert response.status_code == 200
+    assert "data" in response.json()
+
+    # User 2 (non-owner): Should be denied with 403
+    jwt2 = _get_jwt_with_email(client, "user2_stats@example.com")
+    pat2_analyze = _create_pat(client, jwt2, ["fcs:analyze"], name="User2 Analyze Token")
+
+    response = client.get(
+        f"{URLs.FCS_STATISTICS}?file_id={file_id}",
+        headers={"Authorization": f"Bearer {pat2_analyze}"},
+    )
+    assert response.status_code == 403
+    assert "Private file - access denied" in response.json()["message"]
 
