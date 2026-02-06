@@ -6,7 +6,7 @@ including parameter retrieval, events query, file upload, and statistics calcula
 """
 import time
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 
 from sqlalchemy.orm import Session
 
@@ -430,7 +430,7 @@ async def upload_chunk(
     background_tasks: BackgroundTasks,
     task_id: int = Form(...),
     chunk_number: int = Form(..., ge=0),
-    chunk: UploadFile = Form(...),
+    chunk: UploadFile = File(...),
     auth: AuthContext = Depends(require_scope("fcs:write")),
     db: Session = Depends(get_db),
     storage: StorageBackend = Depends(get_storage),
