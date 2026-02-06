@@ -532,13 +532,15 @@ async def upload_chunk(
                 },
             )
 
-    # 6. Save chunk
+    # 6. Save chunk (with timing)
+    start_time = time.time()
     try:
         bytes_written = await storage.save_chunk(
             session_id=str(task_id),
             chunk_number=chunk_number,
             chunk_data=chunk_data,
         )
+        chunk_upload_time_ms = int((time.time() - start_time) * 1000)
 
         # Update progress (Prevent double counting)
         from sqlalchemy.orm.attributes import flag_modified
@@ -548,6 +550,8 @@ async def upload_chunk(
             extra_data["uploaded_chunk_numbers"].append(chunk_number)
             extra_data["uploaded_chunks"] = extra_data.get("uploaded_chunks", 0) + 1
         extra_data["uploaded_bytes"] = extra_data.get("uploaded_bytes", 0) + bytes_written
+        # Accumulate upload time (only count successful uploads)
+        extra_data["accumulated_upload_ms"] = extra_data.get("accumulated_upload_ms", 0) + chunk_upload_time_ms
         task.extra_data = extra_data
         flag_modified(task, "extra_data")  # Explicitly mark JSON column as modified
         db.commit()
@@ -1091,6 +1095,9 @@ async def get_task_status_endpoint(
             response_data["completed_at"] = task.completed_at.isoformat()
             if task.result:
                 response_data["result"] = task.result  # {file_id, filename, total_events, total_parameters}
+                # Add upload duration if available
+                if task.fcs_file and task.fcs_file.upload_duration_ms is not None:
+                    response_data["result"]["upload_duration_ms"] = task.fcs_file.upload_duration_ms
             elif task.fcs_file:
                 # Fallback: get from FCSFile relation
                 response_data["result"] = {
@@ -1098,6 +1105,7 @@ async def get_task_status_endpoint(
                     "filename": task.fcs_file.filename,
                     "total_events": task.fcs_file.total_events,
                     "total_parameters": task.fcs_file.total_parameters,
+                    "upload_duration_ms": task.fcs_file.upload_duration_ms,
                 }
 
         elif task.status == "failed":
