@@ -43,6 +43,10 @@ def db_with_cleanup():
                 Scope(resource='workspaces', action='write', name='workspaces:write', level=2),
                 Scope(resource='workspaces', action='delete', name='workspaces:delete', level=3),
                 Scope(resource='workspaces', action='admin', name='workspaces:admin', level=4),
+                # FCS scopes for file download testing
+                Scope(resource='fcs', action='read', name='fcs:read', level=1),
+                Scope(resource='fcs', action='write', name='fcs:write', level=2),
+                Scope(resource='fcs', action='analyze', name='fcs:analyze', level=3),
             ]
             db.add_all(scopes)
             db.commit()
@@ -56,9 +60,26 @@ def db_with_cleanup():
 
     # Cleanup: delete all test data
     try:
+        from app.models.background_task import BackgroundTask
+        from app.models.fcs_file import FCSFile
+
         db.execute(select(PersonalAccessTokenAuditLog))
         db.query(PersonalAccessTokenAuditLog).delete()
         db.query(PersonalAccessToken).delete()
+
+        # Get test user IDs before deleting anything
+        test_user_ids = [u.id for u in db.query(User).filter(User.email.like("%@audit-test.com")).all()]
+        if test_user_ids:
+            # Delete in correct order due to foreign key constraints:
+            # 1. Delete audit logs (already done above)
+            # 2. Delete background tasks that reference FCS files
+            # 3. Delete FCS files
+            # 4. Delete users
+            fcs_file_ids = [f.id for f in db.query(FCSFile).filter(FCSFile.user_id.in_(test_user_ids)).all()]
+            if fcs_file_ids:
+                db.query(BackgroundTask).filter(BackgroundTask.fcs_file_id.in_(fcs_file_ids)).delete()
+            db.query(FCSFile).filter(FCSFile.user_id.in_(test_user_ids)).delete()
+
         db.query(User).filter(User.email.like("%@audit-test.com")).delete()
         db.commit()
     finally:
@@ -100,13 +121,16 @@ def _create_test_user(db, email_suffix: str = "audit-test") -> str:
 
 def _create_pat(db, user_id: int, scopes: list, name: str = "Test Token") -> str:
     """Helper to create a PAT token directly in the database."""
+    import secrets
+
     # Get scopes
     scope_objs = db.execute(
         select(Scope).where(Scope.name.in_(scopes))
     ).scalars().all()
 
-    # Generate token
-    token_str = f"pat_{hashlib.sha256(bytes(user_id)).hexdigest()[:32]}"
+    # Generate unique token using secrets for better randomness
+    random_part = secrets.token_hex(20)  # 40 hex chars
+    token_str = f"pat_{random_part}"
 
     # Create PAT record
     pat = PersonalAccessToken(
@@ -370,3 +394,112 @@ class TestAuditLoggingMiddleware:
         assert log.status_code == 403
         assert log.authorized is False, "Forbidden requests should have authorized=False"
         assert log.reason == "Insufficient permissions"
+
+    def test_download_creates_audit_log(self, db_with_cleanup, client_with_real_db):
+        """Test that FCS file downloads create audit log entries."""
+        # Setup: Create user with fcs:write and fcs:read PATs
+        user_id = _create_test_user(db_with_cleanup, "download")
+        pat_write = _create_pat(db_with_cleanup, user_id, ["fcs:write", "fcs:analyze"], "FCS Write Token")
+        pat_read = _create_pat(db_with_cleanup, user_id, ["fcs:read"], "FCS Read Token")
+
+        # Get token_id from DB for read token - use user_id to avoid duplicate issues
+        pat_record = db_with_cleanup.execute(
+            select(PersonalAccessToken).where(
+                PersonalAccessToken.user_id == user_id,
+                PersonalAccessToken.name == "FCS Read Token"
+            )
+        ).scalar_one()
+
+        # Upload FCS file using form data (not JSON)
+        import os
+        from io import BytesIO
+
+        sample_fcs_path = "app/data/sample.fcs"
+        file_size = os.path.getsize(sample_fcs_path)
+        chunk_size = 5 * 1024 * 1024  # 5MB
+
+        # Initialize chunked upload
+        init_response = client_with_real_db.post(
+            "/api/v1/fcs/upload",
+            headers={"Authorization": f"Bearer {pat_write}"},
+            data={
+                "filename": "test.fcs",
+                "file_size": file_size,
+                "chunk_size": chunk_size,
+                "is_public": True,
+            },
+        )
+        assert init_response.status_code == 201
+        task_id = init_response.json()["data"]["task_id"]
+        total_chunks = init_response.json()["data"]["total_chunks"]
+
+        # Upload all chunks
+        with open(sample_fcs_path, "rb") as f:
+            for chunk_num in range(total_chunks):
+                chunk_data = f.read(chunk_size)
+                chunk_file = BytesIO(chunk_data)
+
+                chunk_response = client_with_real_db.post(
+                    "/api/v1/fcs/upload/chunk",
+                    headers={"Authorization": f"Bearer {pat_write}"},
+                    data={
+                        "task_id": task_id,
+                        "chunk_number": chunk_num,
+                    },
+                    files={"chunk": (f"chunk_{chunk_num}.dat", chunk_file, "application/octet-stream")},
+                )
+                assert chunk_response.status_code == 202
+
+        # Wait for upload to complete and get file_id
+        import time
+        file_id = None
+        for _ in range(20):
+            task_response = client_with_real_db.get(
+                f"/api/v1/fcs/tasks/{task_id}",
+                headers={"Authorization": f"Bearer {pat_write}"}
+            )
+            assert task_response.status_code == 200
+            task_data = task_response.json()["data"]
+            if task_data["status"] == "completed" and "file_id" in task_data.get("result", {}):
+                file_id = task_data["result"]["file_id"]
+                break
+            time.sleep(0.5)
+
+        assert file_id is not None, "File upload did not complete in time"
+
+        # Verify no download logs exist initially
+        initial_logs = db_with_cleanup.execute(
+            select(PersonalAccessTokenAuditLog).where(
+                PersonalAccessTokenAuditLog.token_id == pat_record.id,
+                PersonalAccessTokenAuditLog.endpoint.like("%/download%")
+            )
+        ).scalars().all()
+        assert len(initial_logs) == 0, "Should start with no download audit logs"
+
+        # Act: Download the file
+        download_response = client_with_real_db.get(
+            f"/api/v1/fcs/files/{file_id}/download",
+            headers={"Authorization": f"Bearer {pat_read}"}
+        )
+
+        # Assert: Download succeeded
+        assert download_response.status_code == 200
+        assert download_response.headers["content-type"] == "application/octet-stream"
+
+        # Assert: Audit log was created for the download
+        logs = db_with_cleanup.execute(
+            select(PersonalAccessTokenAuditLog).where(
+                PersonalAccessTokenAuditLog.token_id == pat_record.id,
+                PersonalAccessTokenAuditLog.endpoint.like("%/download%")
+            )
+        ).scalars().all()
+
+        assert len(logs) == 1, "Should have exactly one download audit log entry"
+
+        log = logs[0]
+        assert log.token_id == pat_record.id
+        assert log.method == "GET"
+        assert f"/api/v1/fcs/files/{file_id}/download" in log.endpoint
+        assert log.status_code == 200
+        assert log.authorized is True
+        assert log.reason is None
