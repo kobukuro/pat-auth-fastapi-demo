@@ -1027,6 +1027,55 @@ async def trigger_statistics_calculation(
     )
 
 
+def _is_task_public(db: Session, task: BackgroundTask) -> bool:
+    """
+    Determine if a task is publicly accessible.
+
+    A task is public if:
+    - Chunked upload: extra_data["is_public"] is True (before file creation)
+                    OR fcs_file.is_public is True (after file creation)
+    - Statistics: fcs_file_id is NULL (sample file)
+                OR fcs_file.is_public is True
+
+    Args:
+        db: Database session
+        task: BackgroundTask to check
+
+    Returns:
+        True if task is public, False if private
+    """
+    if task.task_type == "chunked_upload":
+        # Check extra_data first (handles in-progress uploads)
+        if task.extra_data and "is_public" in task.extra_data:
+            return task.extra_data["is_public"]
+
+        # Fall back to checking the created file
+        if task.fcs_file:
+            return task.fcs_file.is_public
+
+        # Default to private if we can't determine (fail-safe)
+        logger.warning(f"Chunked upload task {task.id} has no is_public info, defaulting to private")
+        return False
+
+    elif task.task_type == "statistics":
+        # NULL fcs_file_id means sample file (public)
+        if task.fcs_file_id is None:
+            return True
+
+        # Check the associated file's visibility
+        if task.fcs_file:
+            return task.fcs_file.is_public
+
+        # File ID exists but file not found - treat as private for safety
+        logger.warning(f"Statistics task {task.id} has fcs_file_id but no file loaded, treating as private")
+        return False
+
+    else:
+        # Unknown task type - default to private for safety
+        logger.warning(f"Unknown task_type '{task.task_type}' for task {task.id}, treating as private")
+        return False
+
+
 @router.get(
     "/tasks/{task_id}",
     response_model=APIResponse[TaskResponseData],
@@ -1107,19 +1156,25 @@ async def get_task_status_endpoint(
         method=request.method,
     )
 
-    # 4. Ownership check: only task owner can view
-    if task.user_id != pat.user_id:
-        logger.warning(
-            f"Unauthorized access to task {task_id} by user {pat.user_id}, owner: {task.user_id}"
-        )
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "success": False,
-                "error": "Forbidden",
-                "message": "You can only view your own tasks",
-            },
-        )
+    # 4. Access control: public tasks visible to all, private tasks only to owner
+    is_task_public = _is_task_public(db, task)
+
+    if not is_task_public:
+        # Private task - only owner can view
+        if task.user_id != pat.user_id:
+            logger.warning(
+                f"Private task access denied: task_id={task_id}, "
+                f"user_id={pat.user_id}, owner={task.user_id}"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "success": False,
+                    "error": "Forbidden",
+                    "message": "Private task - access denied",
+                },
+            )
+    # Public task: no ownership check needed (already passed scope check)
 
     # 3. Build response data based on task_type
     response_data = {
