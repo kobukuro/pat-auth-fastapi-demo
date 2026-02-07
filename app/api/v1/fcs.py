@@ -482,6 +482,17 @@ async def upload_chunk(
             },
         )
 
+    # 1.5. Validate task type
+    if task.task_type != "chunked_upload":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "success": False,
+                "error": "Bad Request",
+                "message": f"Task {task_id} is not an upload session",
+            },
+        )
+
     # 2. Permission check
     if task.user_id != auth.pat.user_id:
         raise HTTPException(
