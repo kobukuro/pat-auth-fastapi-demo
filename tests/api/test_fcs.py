@@ -1126,6 +1126,81 @@ def _upload_fcs_file_and_wait(client, pat_write, filename, is_public):
     return file_id
 
 
+def _upload_fcs_file_and_wait_with_task(client, pat_write, filename, is_public):
+    """Helper to upload FCS file via chunked upload and wait for completion.
+
+    Returns both file_id and task_id from the completed upload.
+    """
+    import os
+    import time
+    from io import BytesIO
+
+    sample_fcs_path = "app/data/sample.fcs"
+    file_size = os.path.getsize(sample_fcs_path)
+    chunk_size = 5 * 1024 * 1024  # 5MB
+
+    # 1. Initialize chunked upload
+    init_response = client.post(
+        URLs.FCS_UPLOAD,
+        headers={"Authorization": f"Bearer {pat_write}"},
+        data={
+            "filename": filename,
+            "file_size": file_size,
+            "chunk_size": chunk_size,
+            "is_public": is_public,
+        },
+    )
+
+    assert init_response.status_code == 201
+    init_data = init_response.json()["data"]
+    task_id = init_data["task_id"]
+    total_chunks = init_data["total_chunks"]
+
+    # 2. Upload all chunks
+    with open(sample_fcs_path, "rb") as f:
+        for chunk_num in range(total_chunks):
+            chunk_data = f.read(chunk_size)
+            chunk_file = BytesIO(chunk_data)
+
+            response = client.post(
+                "/api/v1/fcs/upload/chunk",
+                headers={"Authorization": f"Bearer {pat_write}"},
+                data={
+                    "task_id": task_id,
+                    "chunk_number": chunk_num,
+                },
+                files={"chunk": (f"chunk_{chunk_num}.dat", chunk_file, "application/octet-stream")},
+            )
+
+            assert response.status_code == 202
+
+    # 3. Wait for upload completion
+    max_wait = 10  # seconds
+    start = time.time()
+    file_id = None
+
+    while time.time() - start < max_wait:
+        status_response = client.get(
+            f"/api/v1/fcs/tasks/{task_id}",
+            headers={"Authorization": f"Bearer {pat_write}"},
+        )
+
+        assert status_response.status_code == 200
+        status_data = status_response.json()["data"]
+
+        if status_data["status"] == "completed":
+            assert "result" in status_data
+            result = status_data["result"]
+            file_id = result["file_id"]
+            break
+
+        time.sleep(0.5)
+    else:
+        pytest.fail("Upload did not complete within timeout period")
+
+    return file_id, task_id
+
+
 def test_public_file_accessible_by_other_user(client):
     """Public files can be accessed by any user with fcs:read scope."""
     # User 1: Upload public file
@@ -1549,4 +1624,226 @@ def test_chunk_offset_calculation(client, db):
             assert chunk1_read == chunk1_data, "Chunk 1 data mismatch"
 
     asyncio.run(verify_offsets())
+
+
+# Task Access Control Tests - Public/Private Tasks
+
+
+def test_public_chunked_upload_task_accessible_by_other_user(client):
+    """User 2 can view User 1's public chunked upload task."""
+    # User 1 uploads public file
+    jwt1 = _get_jwt_with_email(client, "user1_public_task@example.com")
+    pat1_write = _create_pat(client, jwt1, ["fcs:write"], name="User1 Write Token")
+    file_id, task_id = _upload_fcs_file_and_wait_with_task(client, pat1_write, "public_upload.fcs", is_public=True)
+
+    # User 2 with fcs:write scope can view the task
+    jwt2 = _get_jwt_with_email(client, "user2_public_task@example.com")
+    pat2_write = _create_pat(client, jwt2, ["fcs:write"], name="User2 Write Token")
+
+    response = client.get(
+        f"/api/v1/fcs/tasks/{task_id}",
+        headers={"Authorization": f"Bearer {pat2_write}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["task_id"] == task_id
+    assert data["task_type"] == "chunked_upload"
+    assert data["status"] == "completed"
+
+
+def test_private_chunked_upload_task_denied_for_non_owner(client):
+    """User 2 cannot view User 1's private chunked upload task."""
+    # User 1 uploads private file
+    jwt1 = _get_jwt_with_email(client, "user1_private_task@example.com")
+    pat1_write = _create_pat(client, jwt1, ["fcs:write"], name="User1 Write Token")
+    file_id, task_id = _upload_fcs_file_and_wait_with_task(client, pat1_write, "private_upload.fcs", is_public=False)
+
+    # User 2 with fcs:write scope denied
+    jwt2 = _get_jwt_with_email(client, "user2_private_task@example.com")
+    pat2_write = _create_pat(client, jwt2, ["fcs:write"], name="User2 Write Token")
+
+    response = client.get(
+        f"/api/v1/fcs/tasks/{task_id}",
+        headers={"Authorization": f"Bearer {pat2_write}"},
+    )
+
+    assert response.status_code == 403
+    # Check response format
+    response_json = response.json()
+    if "detail" in response_json and isinstance(response_json["detail"], dict):
+        assert "Private task - access denied" in response_json["detail"]["message"]
+    else:
+        # FastAPI default format
+        assert "Private task" in str(response_json) or "access denied" in str(response_json).lower()
+
+
+def test_public_statistics_task_accessible_by_other_user(client, db):
+    """User 2 can view User 1's public file statistics task."""
+    from app.models.background_task import BackgroundTask
+
+    # User 1 uploads public file
+    jwt1 = _get_jwt_with_email(client, "user1_public_stats@example.com")
+    pat1_write = _create_pat(client, jwt1, ["fcs:write"], name="User1 Write Token")
+    file_id = _upload_fcs_file_and_wait(client, pat1_write, "public_stats.fcs", is_public=True)
+
+    # User 1 creates statistics task
+    pat1_analyze = _create_pat(client, jwt1, ["fcs:analyze"], name="User1 Analyze Token")
+    response = client.post(
+        URLs.FCS_STATISTICS_CALCULATE,
+        headers={"Authorization": f"Bearer {pat1_analyze}"},
+        json={"file_id": file_id},
+    )
+
+    assert response.status_code == 202
+    task_id = response.json()["data"]["task_id"]
+
+    # User 2 with fcs:analyze scope can view the task
+    jwt2 = _get_jwt_with_email(client, "user2_public_stats@example.com")
+    pat2_analyze = _create_pat(client, jwt2, ["fcs:analyze"], name="User2 Analyze Token")
+
+    response = client.get(
+        f"/api/v1/fcs/tasks/{task_id}",
+        headers={"Authorization": f"Bearer {pat2_analyze}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["task_id"] == task_id
+    assert data["task_type"] == "statistics"
+
+
+def test_private_statistics_task_denied_for_non_owner(client, db):
+    """User 2 cannot view User 1's private file statistics task."""
+    from app.models.background_task import BackgroundTask
+
+    # User 1 uploads private file
+    jwt1 = _get_jwt_with_email(client, "user1_private_stats@example.com")
+    pat1_write = _create_pat(client, jwt1, ["fcs:write"], name="User1 Write Token")
+    file_id = _upload_fcs_file_and_wait(client, pat1_write, "private_stats.fcs", is_public=False)
+
+    # User 1 creates statistics task
+    pat1_analyze = _create_pat(client, jwt1, ["fcs:analyze"], name="User1 Analyze Token")
+    response = client.post(
+        URLs.FCS_STATISTICS_CALCULATE,
+        headers={"Authorization": f"Bearer {pat1_analyze}"},
+        json={"file_id": file_id},
+    )
+
+    assert response.status_code == 202
+    task_id = response.json()["data"]["task_id"]
+
+    # User 2 with fcs:analyze scope denied
+    jwt2 = _get_jwt_with_email(client, "user2_private_stats@example.com")
+    pat2_analyze = _create_pat(client, jwt2, ["fcs:analyze"], name="User2 Analyze Token")
+
+    response = client.get(
+        f"/api/v1/fcs/tasks/{task_id}",
+        headers={"Authorization": f"Bearer {pat2_analyze}"},
+    )
+
+    assert response.status_code == 403
+    # Check response format
+    response_json = response.json()
+    if "detail" in response_json and isinstance(response_json["detail"], dict):
+        assert "Private task - access denied" in response_json["detail"]["message"]
+    else:
+        # FastAPI default format
+        assert "Private task" in str(response_json) or "access denied" in str(response_json).lower()
+
+
+def test_public_in_progress_upload_task_accessible_by_other_user(client):
+    """User 2 can view User 1's public upload task before completion."""
+    import os
+    from io import BytesIO
+
+    sample_fcs_path = "app/data/sample.fcs"
+    file_size = os.path.getsize(sample_fcs_path)
+    chunk_size = 1 * 1024 * 1024  # 1MB (smaller chunk to ensure multiple chunks)
+
+    # User 1 starts upload (doesn't wait for completion)
+    jwt1 = _get_jwt_with_email(client, "user1_in_progress@example.com")
+    pat1_write = _create_pat(client, jwt1, ["fcs:write"], name="User1 Write Token")
+
+    init_response = client.post(
+        URLs.FCS_UPLOAD,
+        headers={"Authorization": f"Bearer {pat1_write}"},
+        data={
+            "filename": "in_progress.fcs",
+            "file_size": file_size,
+            "chunk_size": chunk_size,
+            "is_public": True,
+        },
+    )
+
+    assert init_response.status_code == 201
+    task_id = init_response.json()["data"]["task_id"]
+    total_chunks = init_response.json()["data"]["total_chunks"]
+
+    # Upload first chunk only to keep task in progress (if total_chunks > 1)
+    if total_chunks > 1:
+        with open(sample_fcs_path, "rb") as f:
+            chunk_data = f.read(chunk_size)
+            chunk_file = BytesIO(chunk_data)
+
+            response = client.post(
+                URLs.FCS_UPLOAD_CHUNK,
+                headers={"Authorization": f"Bearer {pat1_write}"},
+                data={
+                    "task_id": task_id,
+                    "chunk_number": 0,
+                },
+                files={"chunk": ("chunk_0.dat", chunk_file, "application/octet-stream")},
+            )
+
+            assert response.status_code == 202
+
+        # User 2 with fcs:write scope can view the in-progress task
+        jwt2 = _get_jwt_with_email(client, "user2_in_progress@example.com")
+        pat2_write = _create_pat(client, jwt2, ["fcs:write"], name="User2 Write Token")
+
+        response = client.get(
+            f"/api/v1/fcs/tasks/{task_id}",
+            headers={"Authorization": f"Bearer {pat2_write}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["task_id"] == task_id
+        assert data["status"] in ["pending", "processing", "finalizing"]
+    else:
+        # File is too small to test in-progress state, skip this scenario
+        pass
+
+
+def test_sample_file_statistics_task_is_public(client):
+    """Statistics tasks for sample files (no fcs_file_id) are public."""
+    from app.models.background_task import BackgroundTask
+
+    # User 1 creates statistics task for sample file (no file_id parameter)
+    jwt1 = _get_jwt_with_email(client, "user1_sample_stats@example.com")
+    pat1_analyze = _create_pat(client, jwt1, ["fcs:analyze"], name="User1 Analyze Token")
+
+    response = client.post(
+        URLs.FCS_STATISTICS_CALCULATE,
+        headers={"Authorization": f"Bearer {pat1_analyze}"},
+        json={},  # Empty body = sample file
+    )
+
+    assert response.status_code == 202
+    task_id = response.json()["data"]["task_id"]
+
+    # User 2 can view the sample file task
+    jwt2 = _get_jwt_with_email(client, "user2_sample_stats@example.com")
+    pat2_analyze = _create_pat(client, jwt2, ["fcs:analyze"], name="User2 Analyze Token")
+
+    response = client.get(
+        f"/api/v1/fcs/tasks/{task_id}",
+        headers={"Authorization": f"Bearer {pat2_analyze}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["task_id"] == task_id
+    assert data["task_type"] == "statistics"
 
