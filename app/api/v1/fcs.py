@@ -613,7 +613,7 @@ async def upload_chunk(
             },
         )
 
-    # 7. Auto-trigger completion on last chunk (防重入)
+    # 7. Auto-trigger completion on last chunk
     is_last_chunk = (task.extra_data["uploaded_chunks"] == task.extra_data["total_chunks"])
 
     if is_last_chunk and task.status not in ["finalizing", "completed"]:
