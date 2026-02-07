@@ -1117,7 +1117,7 @@ async def get_task_status_endpoint(
             detail={
                 "success": False,
                 "error": "Forbidden",
-                "message": "You can only view your own tasks",
+                "message": "You can only view your own tasks and public tasks",
             },
         )
 
