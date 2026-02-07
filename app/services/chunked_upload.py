@@ -6,13 +6,12 @@ including file assembly, FCS metadata extraction, and database record creation.
 """
 from datetime import datetime
 
-from app.database import SessionLocal
+from app.dependencies.storage import get_storage
 from app.logging_config import setup_logging
 from app.models.background_task import BackgroundTask
 from app.models.fcs_file import FCSFile
 from app.services.fcs import get_fcs_parameters
 from app.storage.base import StorageBackend
-from app.dependencies.storage import get_storage
 from app.utils.ids import generate_short_id
 
 logger = setup_logging()
@@ -44,13 +43,13 @@ async def finalize_chunked_upload(
     storage: StorageBackend = get_storage()
 
     try:
-        # 1. Get task with防重入 check
+        # 1. Get task with idempotency check
         task = db.query(BackgroundTask).filter_by(id=task_id).first()
 
         if not task:
             raise ValueError(f"Upload session {task_id} not found")
 
-        # 防重入: Skip if already completed
+        # Idempotency: Skip if already completed
         if task.status == "completed":
             logger.info(f"Task {task_id} already completed, skipping")
             if task.result:
@@ -63,7 +62,7 @@ async def finalize_chunked_upload(
                     "total_parameters": task.fcs_file.total_parameters or 0,
                 }
 
-        # 防重入: Check if already finalizing
+        # Idempotency: Check if already finalizing
         if task.status == "finalizing":
             logger.info(f"Task {task_id} is already finalizing")
             # Wait or return error (simplified: return error)
