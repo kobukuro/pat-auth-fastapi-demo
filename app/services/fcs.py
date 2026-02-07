@@ -185,6 +185,33 @@ def get_fcs_file_path(file_id: str | None, db) -> tuple[str, object | None]:
     return fcs_file.file_path, fcs_file
 
 
+def get_fcs_file_for_download(file_id: str, db) -> tuple[str, str, "FCSFile"]:
+    """
+    Validate file access and return file path, filename, and metadata.
+
+    Args:
+        file_id: Short file identifier (12-character base62)
+        db: Database session
+
+    Returns:
+        tuple of (file_path, filename, fcs_file_record)
+
+    Raises:
+        ValueError: If file not found
+    """
+    from app.models.fcs_file import FCSFile
+    from sqlalchemy import select
+
+    fcs_file = db.execute(
+        select(FCSFile).where(FCSFile.file_id == file_id)
+    ).scalar_one_or_none()
+
+    if not fcs_file:
+        raise ValueError(f"FCS file with file_id '{file_id}' not found")
+
+    return fcs_file.file_path, fcs_file.filename, fcs_file
+
+
 def get_fcs_events(file_path: str, limit: int = 100, offset: int = 0) -> FCSEventsData:
     """
     Parse FCS file and extract events data with pagination.

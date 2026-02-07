@@ -6,8 +6,10 @@ including parameter retrieval, events query, file upload, and statistics calcula
 """
 import time
 
+from pathlib import Path
+
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
@@ -35,6 +37,7 @@ from app.schemas.fcs import (
 )
 from app.services.fcs import (
     get_fcs_events,
+    get_fcs_file_for_download,
     get_fcs_file_path,
     get_fcs_parameters,
     get_sample_fcs_path,
@@ -1161,13 +1164,18 @@ async def get_task_status_endpoint(
             }
 
         elif task.status == "completed":
-            # Upload completed - return FCSFile info
+            # Upload completed - return FCSFile info with download URL
             response_data["completed_at"] = task.completed_at.isoformat()
             if task.result:
                 response_data["result"] = task.result  # {file_id, filename, total_events, total_parameters}
                 # Add upload duration if available
                 if task.fcs_file and task.fcs_file.upload_duration_ms is not None:
                     response_data["result"]["upload_duration_ms"] = task.fcs_file.upload_duration_ms
+                # Add download_url if file_id exists
+                if "file_id" in task.result:
+                    response_data["result"]["download_url"] = (
+                        f"/api/v1/fcs/files/{task.result['file_id']}/download"
+                    )
             elif task.fcs_file:
                 # Fallback: get from FCSFile relation
                 response_data["result"] = {
@@ -1176,6 +1184,9 @@ async def get_task_status_endpoint(
                     "total_events": task.fcs_file.total_events,
                     "total_parameters": task.fcs_file.total_parameters,
                     "upload_duration_ms": task.fcs_file.upload_duration_ms,
+                    "download_url": (
+                        f"/api/v1/fcs/files/{task.fcs_file.file_id}/download"
+                    ),
                 }
 
         elif task.status == "failed":
@@ -1186,3 +1197,89 @@ async def get_task_status_endpoint(
     logger.info(f"Task status requested: task_id={task_id}, task_type={task.task_type}, status={task.status}")
 
     return APIResponse(success=True, data=response_data)
+
+
+@router.get(
+    "/files/{file_id}/download",
+    status_code=status.HTTP_200_OK,
+)
+async def download_fcs_file(
+    file_id: str,
+    auth: AuthContext = Depends(require_scope("fcs:read")),
+    db: Session = Depends(get_db),
+):
+    """
+    Download FCS file by short ID.
+
+    **Scope required:** `fcs:read`
+
+    **Permissions:**
+    - Public files: Any user with `fcs:read` scope
+    - Private files: Only file owner
+
+    **Streaming Response:**
+    - Returns file stream for large files (up to 1GB)
+    - Content-Disposition: attachment (triggers browser download)
+
+    Args:
+        file_id: Short file identifier (12-character base62)
+        auth: AuthContext containing PAT and user info
+        db: Database session
+
+    Returns:
+        FileResponse with streaming file download
+
+    Raises:
+        HTTPException 403: Private file access by non-owner
+        HTTPException 404: File not found
+    """
+    # 1. Get file path and metadata
+    try:
+        file_path, filename, fcs_file = get_fcs_file_for_download(file_id, db)
+    except ValueError as e:
+        logger.warning(f"FCS file download failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "success": False,
+                "error": "Not Found",
+                "message": "FCS file not found",
+            },
+        )
+
+    # 2. Permission check for private files
+    if not fcs_file.is_public:
+        pat_user_id = auth.pat.user_id if auth.pat else None
+        if fcs_file.user_id != pat_user_id:
+            logger.warning(
+                f"Private file access denied: file_id={file_id}, "
+                f"user_id={pat_user_id}, owner={fcs_file.user_id}"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "success": False,
+                    "error": "Forbidden",
+                    "message": "Private file - access denied",
+                },
+            )
+
+    # 3. Verify file exists on disk
+    if not Path(file_path).exists():
+        logger.error(f"File not found on disk: {file_path}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "success": False,
+                "error": "Not Found",
+                "message": "File not available",
+            },
+        )
+
+    # 4. Return streaming file response
+    return FileResponse(
+        path=file_path,
+        filename=filename,
+        media_type="application/octet-stream",
+        content_disposition_type="attachment",
+    )
