@@ -288,3 +288,48 @@ def test_upload_valid_fcs_file_accepted(client, auth_pat):
 
     # Should return 202 (accepted)
     assert response.status_code == 202
+
+
+def test_upload_chunk_with_wrong_task_type_returns_400(client, auth_pat, db):
+    """Test that uploading a chunk with a statistics task_id returns 400."""
+    from app.models.background_task import BackgroundTask
+    from app.models.user import User
+
+    # Get the actual user_id from the database
+    user = db.query(User).filter_by(email="user1@example.com").first()
+    assert user is not None, "Test user should exist"
+
+    # Create a statistics task (not chunked upload)
+    stats_task = BackgroundTask(
+        user_id=user.id,
+        task_type="statistics",
+        status="pending",
+        extra_data={"file_id": 1}
+    )
+    db.add(stats_task)
+    db.commit()
+    db.refresh(stats_task)
+
+    # Try to upload chunk to statistics task
+    fcs_header = b"FCS3.0         256  "
+    chunk_data = fcs_header + b"x" * (5242880 - len(fcs_header))  # Pad to 5MB
+
+    response = client.post(
+        "/api/v1/fcs/upload/chunk",
+        headers={"Authorization": f"Bearer {auth_pat}"},
+        data={
+            "task_id": stats_task.id,
+            "chunk_number": 0,
+        },
+        files={"chunk": ("chunk_0.dat", BytesIO(chunk_data), "application/octet-stream")},
+    )
+
+    # Should return 400 with error message about not being an upload session
+    assert response.status_code == 400
+    data = response.json()
+    assert data["success"] is False
+    assert "not an upload session" in data["message"]
+
+    # Clean up
+    db.delete(stats_task)
+    db.commit()
