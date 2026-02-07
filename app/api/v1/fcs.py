@@ -7,14 +7,17 @@ including parameter retrieval, events query, file upload, and statistics calcula
 import time
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import JSONResponse
 
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 
 from app.config import settings
 from app.database import SessionLocal, get_db
 from app.dependencies.pat import AuthContext, get_pat_with_scopes, require_scope
 from app.dependencies.storage import get_storage
 from app.logging_config import setup_logging
+from app.models.background_task import BackgroundTask
 from app.models.fcs_file import FCSFile
 from app.models.pat import PersonalAccessToken
 from app.models.scope import Scope
@@ -727,7 +730,7 @@ async def abort_chunked_upload(
 
 @router.get(
     "/statistics",
-    response_model=APIResponse[FCSStatisticsResponseData],
+    response_model=APIResponse[FCSStatisticsResponseData | dict],
     status_code=status.HTTP_200_OK,
 )
 async def get_fcs_statistics_endpoint(
@@ -740,8 +743,10 @@ async def get_fcs_statistics_endpoint(
     """
     Get FCS file statistics from cache.
 
-    Returns cached statistics only. If statistics haven't been calculated yet,
-    returns 404 with a message to call POST /statistics/calculate first.
+    Returns cached statistics if available. If a calculation is in progress,
+    returns 202 with task information. If statistics haven't been calculated
+    and no task is in progress, returns 404 with a message to call
+    POST /statistics/calculate first.
 
     **Scope required:** `fcs:analyze`
 
@@ -756,13 +761,14 @@ async def get_fcs_statistics_endpoint(
         db: Database session
 
     Returns:
-        APIResponse with FCSStatisticsResponseData containing:
-        - total_events: Total number of events
-        - statistics: List of statistics for each parameter
+        - 200: APIResponse with FCSStatisticsResponseData containing:
+            - total_events: Total number of events
+            - statistics: List of statistics for each parameter
+        - 202: APIResponse with task info (task_id, status, message) if calculation in progress
 
     Raises:
         HTTPException 403: If private file and user is not owner
-        HTTPException 404: If statistics not calculated yet
+        HTTPException 404: If statistics not calculated yet and no task in progress
     """
     # 1. Determine which file to read
     if file_id is None:
@@ -799,7 +805,34 @@ async def get_fcs_statistics_endpoint(
                 },
             )
 
-    # 3. Read from cache
+    # 3. Check for in-progress calculation task
+    # For sample files, fcs_file_id is NULL; for uploaded files, it's the file's ID
+    fcs_file_id_for_task = fcs_file.id if fcs_file else None
+
+    in_progress_task = db.query(BackgroundTask).filter(
+        BackgroundTask.fcs_file_id == fcs_file_id_for_task,
+        BackgroundTask.task_type == "statistics",
+        or_(
+            BackgroundTask.status == "pending",
+            BackgroundTask.status == "processing",
+        ),
+    ).first()
+
+    if in_progress_task:
+        logger.info(f"Statistics calculation in progress for file_id: {file_id_for_storage}, task_id: {in_progress_task.id}")
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content={
+                "success": True,
+                "data": {
+                    "task_id": in_progress_task.id,
+                    "status": in_progress_task.status,
+                    "message": "Statistics calculation in progress",
+                },
+            },
+        )
+
+    # 4. Read from cache
     cached = db.query(FCSStatistics).filter_by(file_id=file_id_for_storage).first()
 
     if not cached:
@@ -813,7 +846,7 @@ async def get_fcs_statistics_endpoint(
             },
         )
 
-    # 4. Return cached result
+    # 5. Return cached result
     logger.info(f"Returning cached statistics for file_id: {file_id_for_storage}")
     return APIResponse(
         success=True,
