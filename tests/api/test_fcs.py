@@ -776,6 +776,47 @@ def test_fcs_statistics_returns_404_when_not_calculated(client):
     assert "calculate" in data["message"]
 
 
+def test_fcs_statistics_returns_202_when_calculation_in_progress(client, db):
+    """Test GET /statistics returns 202 when calculation is in progress."""
+    from app.models.background_task import BackgroundTask
+    from app.models.user import User
+
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:analyze"])
+
+    # Get the actual user_id from the database
+    user = db.query(User).filter_by(email="fcs@example.com").first()
+    assert user is not None, "Test user should exist"
+
+    # Create an in-progress task for sample file (fcs_file_id = NULL)
+    task = BackgroundTask(
+        task_type="statistics",
+        fcs_file_id=None,  # NULL for sample file
+        status="pending",
+        user_id=user.id,  # Use actual user ID
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+
+    # Get statistics - should return 202 with task info
+    response = client.get(
+        URLs.FCS_STATISTICS,
+        headers={"Authorization": f"Bearer {pat}"},
+    )
+
+    assert response.status_code == 202  # Changed from 404
+    data = response.json()
+    assert data["success"] is True
+    assert data["data"]["status"] == "pending"
+    assert data["data"]["task_id"] == task.id
+    assert "in progress" in data["data"]["message"].lower()
+
+    # Clean up
+    db.delete(task)
+    db.commit()
+
+
 def test_fcs_statistics_calculate_triggers_background_task(client):
     """Test POST /statistics/calculate triggers background task."""
     jwt = _get_jwt(client)
