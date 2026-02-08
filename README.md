@@ -389,3 +389,5 @@ curl.exe -X GET "http://localhost:8000/api/v1/fcs/files/abc123xyz/download" `
     - 當PAT或scope被刪除時，CASCADE規則可以自動清理關聯
 3. endpoint的權限需求定義在程式碼中
     - 不在資料庫定義，避免要維護兩份(符合DRY原則)
+4. 當最後一個chunk上傳後，觸發背景任務來處理檔案
+    - 提高使用者體驗，在呼叫API上傳最後一個chunk時不需要等待檔案處理完成才收到回應
