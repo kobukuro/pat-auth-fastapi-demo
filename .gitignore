@@ -10,3 +10,9 @@ wheels/
 .venv
 
 .idea
+.claude
+
+# Environment variables
+.env
+
+app/storage/data
