@@ -1378,6 +1378,101 @@ def test_private_file_access_control_statistics_endpoint(client, db):
 
 
 # ========================================
+# File Size Validation Tests
+# ========================================
+
+
+def test_fcs_upload_exceeds_max_file_size(client):
+    """Test that files exceeding MAX_UPLOAD_SIZE_MB (1000MB) are rejected."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:write"])
+
+    # Try to initialize upload with file size exceeding 1GB
+    response = client.post(
+        URLs.FCS_UPLOAD,
+        headers={"Authorization": f"Bearer {pat}"},
+        data={
+            "filename": "large.fcs",
+            "file_size": 1001 * 1024 * 1024,  # 1001MB (exceeds limit)
+            "chunk_size": 5 * 1024 * 1024,
+            "is_public": True,
+        },
+    )
+
+    # FastAPI validation error returns 422 with different format
+    assert response.status_code == 422
+    data = response.json()
+    # Validation errors have "detail" key with list of errors
+    assert "detail" in data
+    # Check that the error is about file_size exceeding limit
+    assert any(error.get("loc") == ["body", "file_size"] for error in data["detail"])
+
+
+def test_fcs_upload_exactly_max_size_accepted(client):
+    """Test that files exactly at max size (1000MB) are accepted."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:write"])
+
+    # Initialize upload with file size exactly at 1GB limit
+    response = client.post(
+        URLs.FCS_UPLOAD,
+        headers={"Authorization": f"Bearer {pat}"},
+        data={
+            "filename": "max_size.fcs",
+            "file_size": 1000 * 1024 * 1024,  # Exactly 1000MB (at limit)
+            "chunk_size": 5 * 1024 * 1024,
+            "is_public": True,
+        },
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["success"] is True
+    assert "task_id" in data["data"]
+    assert data["data"]["total_chunks"] == 200  # 1000MB / 5MB = 200 chunks
+
+
+def test_fcs_upload_with_invalid_file_sizes(client):
+    """Test that invalid file sizes (zero, negative) are rejected."""
+    jwt = _get_jwt(client)
+    pat = _create_pat(client, jwt, ["fcs:write"])
+
+    # Test with file_size = 0
+    response = client.post(
+        URLs.FCS_UPLOAD,
+        headers={"Authorization": f"Bearer {pat}"},
+        data={
+            "filename": "zero.fcs",
+            "file_size": 0,  # Invalid (must be > 0)
+            "chunk_size": 5 * 1024 * 1024,
+            "is_public": True,
+        },
+    )
+
+    assert response.status_code == 422
+    data = response.json()
+    assert "detail" in data
+    assert any(error.get("loc") == ["body", "file_size"] for error in data["detail"])
+
+    # Test with negative file_size
+    response = client.post(
+        URLs.FCS_UPLOAD,
+        headers={"Authorization": f"Bearer {pat}"},
+        data={
+            "filename": "negative.fcs",
+            "file_size": -1,  # Invalid (must be > 0)
+            "chunk_size": 5 * 1024 * 1024,
+            "is_public": True,
+        },
+    )
+
+    assert response.status_code == 422
+    data = response.json()
+    assert "detail" in data
+    assert any(error.get("loc") == ["body", "file_size"] for error in data["detail"])
+
+
+# ========================================
 # Chunk Size Validation Tests
 # ========================================
 
