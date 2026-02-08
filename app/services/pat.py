@@ -4,6 +4,7 @@ import secrets
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.models.pat import PersonalAccessToken
 from app.models.scope import Scope
 
 
@@ -57,3 +58,45 @@ def has_permission(db: Session, granted_scopes: list[Scope], required_scope: str
             return True
 
     return False
+
+
+def get_pat_by_token(db: Session, token: str) -> PersonalAccessToken | None:
+    """
+    Lookup PAT by token using indexed prefix lookup with hash verification.
+
+    This function uses a two-step lookup strategy:
+    1. Query by token_prefix (indexed) to get candidate tokens
+    2. Verify token_hash to find exact match (security)
+
+    Args:
+        db: Database session
+        token: Full token string (47 chars, starts with "pat_")
+
+    Returns:
+        PersonalAccessToken record if found, None otherwise
+
+    Security:
+        - token_prefix reduces search space using index
+        - token_hash verification prevents prefix collision attacks
+        - Hash comparison ensures exact match
+    """
+    # Extract prefix (first 8 chars: "pat_xxxx")
+    token_prefix = token[:8]
+
+    # Calculate hash for verification
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+
+    # Query by indexed prefix first
+    candidates = db.execute(
+        select(PersonalAccessToken).where(
+            PersonalAccessToken.token_prefix == token_prefix
+        )
+    ).scalars().all()
+
+    # Verify hash to find exact match
+    for candidate in candidates:
+        if candidate.token_hash == token_hash:
+            return candidate
+
+    # No match found
+    return None

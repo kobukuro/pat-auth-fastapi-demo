@@ -49,13 +49,10 @@ async def audit_pat_middleware(request: Request, call_next):
         db = SessionLocal()
 
         try:
-            # Find token by hash
-            token_hash = hashlib.sha256(token_str.encode()).hexdigest()
-            pat = db.execute(
-                select(PersonalAccessToken).where(
-                    PersonalAccessToken.token_hash == token_hash
-                )
-            ).scalar_one_or_none()
+            # Find token by indexed prefix with hash verification
+            from app.services.pat import get_pat_by_token
+
+            pat = get_pat_by_token(db, token_str)
 
             # Only log if token exists in our database (we need token_id)
             if pat:
