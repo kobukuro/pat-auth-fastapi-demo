@@ -55,13 +55,10 @@ def get_pat_with_scopes(
             },
         )
 
-    # Hash token and lookup in database
-    token_hash = hashlib.sha256(token.encode()).hexdigest()
-    pat = db.execute(
-        select(PersonalAccessToken).where(
-            PersonalAccessToken.token_hash == token_hash
-        )
-    ).scalar_one_or_none()
+    # Lookup token using indexed prefix with hash verification
+    from app.services.pat import get_pat_by_token
+
+    pat = get_pat_by_token(db, token)
 
     if not pat:
         raise HTTPException(
