@@ -4,6 +4,7 @@ import secrets
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.models.pat import PersonalAccessToken
 from app.models.scope import Scope
 
 
@@ -57,3 +58,50 @@ def has_permission(db: Session, granted_scopes: list[Scope], required_scope: str
             return True
 
     return False
+
+
+def get_pat_by_token(db: Session, token: str) -> PersonalAccessToken | None:
+    """
+    Lookup PAT by token using indexed prefix with hash filter.
+
+    Query strategy:
+    - Use token_prefix (indexed) for fast lookup: O(log n)
+    - Filter by token_hash in SQL to get exact match: O(k) where k is candidates
+    - Single query returning 0 or 1 record, no memory overhead
+
+    Args:
+        db: Database session
+        token: Full token string (47 chars, starts with "pat_")
+
+    Returns:
+        PersonalAccessToken record if found, None otherwise
+
+    Security:
+        - token_prefix reduces search space using index
+        - token_hash filter prevents prefix collision attacks
+        - SQL-level filtering avoids memory issues
+
+    Performance:
+        - token_prefix has index → O(log n) lookup
+        - token_hash has NO index but filters small candidate set
+        - Typically k=0 or k=1, so hash filter is effectively O(1)
+    """
+    # Early validation: check token format before querying database
+    if not token or len(token) < 8 or not token.startswith("pat_"):
+        return None
+
+    # Extract prefix (first 8 chars: "pat_xxxx")
+    token_prefix = token[:8]
+
+    # Calculate hash for verification
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+
+    # Single query: indexed prefix + hash filter
+    pat = db.execute(
+        select(PersonalAccessToken).where(
+            PersonalAccessToken.token_prefix == token_prefix,
+            PersonalAccessToken.token_hash == token_hash,
+        )
+    ).scalar_one_or_none()
+
+    return pat
