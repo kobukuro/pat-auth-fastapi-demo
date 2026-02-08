@@ -62,11 +62,12 @@ def has_permission(db: Session, granted_scopes: list[Scope], required_scope: str
 
 def get_pat_by_token(db: Session, token: str) -> PersonalAccessToken | None:
     """
-    Lookup PAT by token using indexed prefix lookup with hash verification.
+    Lookup PAT by token using indexed prefix with hash filter.
 
-    This function uses a two-step lookup strategy:
-    1. Query by token_prefix (indexed) to get candidate tokens
-    2. Verify token_hash to find exact match (security)
+    Query strategy:
+    - Use token_prefix (indexed) for fast lookup: O(log n)
+    - Filter by token_hash in SQL to get exact match: O(k) where k is candidates
+    - Single query returning 0 or 1 record, no memory overhead
 
     Args:
         db: Database session
@@ -77,8 +78,13 @@ def get_pat_by_token(db: Session, token: str) -> PersonalAccessToken | None:
 
     Security:
         - token_prefix reduces search space using index
-        - token_hash verification prevents prefix collision attacks
-        - Hash comparison ensures exact match
+        - token_hash filter prevents prefix collision attacks
+        - SQL-level filtering avoids memory issues
+
+    Performance:
+        - token_prefix has index → O(log n) lookup
+        - token_hash has NO index but filters small candidate set
+        - Typically k=0 or k=1, so hash filter is effectively O(1)
     """
     # Extract prefix (first 8 chars: "pat_xxxx")
     token_prefix = token[:8]
@@ -86,17 +92,12 @@ def get_pat_by_token(db: Session, token: str) -> PersonalAccessToken | None:
     # Calculate hash for verification
     token_hash = hashlib.sha256(token.encode()).hexdigest()
 
-    # Query by indexed prefix first
-    candidates = db.execute(
+    # Single query: indexed prefix + hash filter
+    pat = db.execute(
         select(PersonalAccessToken).where(
-            PersonalAccessToken.token_prefix == token_prefix
+            PersonalAccessToken.token_prefix == token_prefix,
+            PersonalAccessToken.token_hash == token_hash,
         )
-    ).scalars().all()
+    ).scalar_one_or_none()
 
-    # Verify hash to find exact match
-    for candidate in candidates:
-        if candidate.token_hash == token_hash:
-            return candidate
-
-    # No match found
-    return None
+    return pat
