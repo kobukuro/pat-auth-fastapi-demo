@@ -32,6 +32,10 @@
 └─────────────────────────────────────────────────────────┘
 ```
 
+### Table Schemas
+
+![Table Schemas](docs/table-schemas.png)
+
 ### 認證與授權詳細流程
 
 ```
@@ -339,7 +343,8 @@ curl.exe -X POST http://localhost:8000/api/v1/fcs/upload `
     "file_size": 157286400,
     "chunk_size": 5242880,
     "total_chunks": 30,
-    "status": "processing"
+    "status": "processing",
+    "expires_at": "EXPIRATION_TIMESTAMP"
   }
 }
 
