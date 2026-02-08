@@ -86,6 +86,10 @@ def get_pat_by_token(db: Session, token: str) -> PersonalAccessToken | None:
         - token_hash has NO index but filters small candidate set
         - Typically k=0 or k=1, so hash filter is effectively O(1)
     """
+    # Early validation: check token format before querying database
+    if not token or len(token) < 8 or not token.startswith("pat_"):
+        return None
+
     # Extract prefix (first 8 chars: "pat_xxxx")
     token_prefix = token[:8]
 
