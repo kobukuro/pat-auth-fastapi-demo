@@ -1,12 +1,9 @@
-import hashlib
 from datetime import datetime, timezone
 
 from fastapi import Request
-from sqlalchemy import select
 
 from app.database import SessionLocal
 from app.models.audit_log import PersonalAccessTokenAuditLog
-from app.models.pat import PersonalAccessToken
 from app.utils.datetime import ensure_aware
 
 
