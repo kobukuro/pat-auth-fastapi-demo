@@ -7,19 +7,30 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
       - "5432:5432"
+    # Volume 讓容器資料持久化，容器刪除後資料仍然保留
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      # CMD-SHELL: 告訴 Docker 使用 shell來執行後面的指令（類似 /bin/sh -c 指令）
+      # 使用 PostgreSQL內建的pg_isready工具來驗證資料庫是否已準備好接受連線
+      # -U ${POSTGRES_USER}：指定要檢查的資料庫使用者名稱（從環境變數讀取）
+      # 如果資料庫就緒 → 回傳 0 (exit code 0)，Docker 判定為 healthy
+      # 如果資料庫未就緒 → 回傳非 0 的 exit code，Docker 判定為 unhealthy
+      # interval: 5s → 每5秒執行一次健康檢查
+      # timeout: 5s → 每次健康檢查的最大等待時間為5秒（5秒內沒回應就視為失敗）
+      # retries: 5 → 如果連續5次健康檢查失敗，則將服務標記為 unhealthy
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER}" ]
       interval: 5s
       timeout: 5s
       retries: 5
+    # 宣告此服務屬於哪些profiles
     profiles:
       - dev
       - test
 
   app:
     build:
+      # target: 指定要使用 Dockerfile中哪個階段來建構映像檔，這裡指定為 development 階段
       target: development
     ports:
       - "8000:8000"
@@ -28,6 +39,9 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
     depends_on:
       db:
+        # 依賴條件：等待 db 變成 healthy 狀態
+        # 沒有 condition: service_healthy 的情況, 可能發生：
+        #   db 啟動 → app 立即啟動 → app 嘗試連線 → 連線失敗（db還沒好）
         condition: service_healthy
     profiles:
       - dev
@@ -43,6 +57,7 @@ services:
         condition: service_healthy
     profiles:
       - test
-
+# 宣告頂層 volumes 區塊（定義具名 volume）
 volumes:
+  # 創建一個名為 postgres_data 的具名 volume
   postgres_data:
