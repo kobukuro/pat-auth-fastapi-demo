@@ -3,8 +3,11 @@ from datetime import datetime, timezone
 from fastapi import Request
 
 from app.database import SessionLocal
+from app.logging_config import setup_logging
 from app.models.audit_log import PersonalAccessTokenAuditLog
 from app.utils.datetime import ensure_aware
+
+logger = setup_logging()
 
 
 async def audit_pat_middleware(request: Request, call_next):
@@ -95,8 +98,7 @@ async def audit_pat_middleware(request: Request, call_next):
         except Exception as e:
             # Non-blocking: don't let logging failures break the request
             db.rollback()
-            # In production, you'd want to log this error somewhere
-            print(f"Audit logging failed: {e}")
+            logger.error(f"Audit logging failed: {e}")
         finally:
             db.close()
 
