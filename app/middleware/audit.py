@@ -42,7 +42,7 @@ async def audit_pat_middleware(request: Request, call_next):
 
     # After request completes, log if it was a PAT
     if is_pat:
-        # Create a new DB session for audit logging (route's session is already closed)
+        # Create a new DB session for audit logging since any request-scoped session created by dependencies has already been cleaned up (closed) by this point
         db = SessionLocal()
 
         try:
