@@ -98,7 +98,7 @@ async def audit_pat_middleware(request: Request, call_next):
         except Exception as e:
             # Non-blocking: don't let logging failures break the request
             db.rollback()
-            logger.error(f"Audit logging failed: {e}")
+            logger.error(f"Audit logging failed: {e}", exc_info=True)
         finally:
             db.close()
 
