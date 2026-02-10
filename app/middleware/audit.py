@@ -19,7 +19,7 @@ async def audit_pat_middleware(request: Request, call_next):
 
     Non-blocking: logging failures don't break the request.
     """
-    # Get authorization header
+    # Get authorization header, 如果不存在則回傳空字串
     auth_header = request.headers.get("Authorization", "")
     token_str = None
 
@@ -40,7 +40,7 @@ async def audit_pat_middleware(request: Request, call_next):
         path = f"{path}?{request.url.query}"
     endpoint = path
 
-    # Process the request first
+    # Process the request first，暫停當前函數執行，將request傳遞給下一個中間件/路由，等待所有後續處理完成，接收最終的Response object
     response = await call_next(request)
 
     # After request completes, log if it was a PAT
