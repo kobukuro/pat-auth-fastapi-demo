@@ -11,6 +11,7 @@ from app.utils.validators import PasswordValidationError, validate_password_comp
 # 序列化/反序列化:支援將物件轉成JSON字典，或從字典建立物件
 # 欄位驗證:支援自訂驗證器
 # 自動產生文件:FastAPI會自動根據Schema產生API文件（Swagger UI）
+# 另外，如果驗證失敗，Pydantic會拋出ValidationError例外
 class UserRegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
