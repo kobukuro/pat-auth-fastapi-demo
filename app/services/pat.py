@@ -140,9 +140,17 @@ def get_pat_by_token(db: Session, token: str) -> PersonalAccessToken | None:
     token_prefix = token[:8]
 
     # Calculate hash for verification
+    # token.encode(): 將token字串轉換為bytes，因為hashlib的hash函數需要bytes輸入
+    # hashlib.sha256(...): 使用SHA-256演算法對bytes進行雜湊運算，產生一個256位（32 位元組）的雜湊值
+    # .hexdigest(): 將雜湊值轉換成十六進位字串（hex string）
     token_hash = hashlib.sha256(token.encode()).hexdigest()
 
     # Single query: indexed prefix + hash filter
+    # .scalar_one_or_none() 方法
+    #   這是 SQLAlchemy 的結果處理方法：
+    #     - 如果找到1筆資料，就回傳PersonalAccessToken物件
+    #     - 如果找不到資料，就回傳 None
+    #     - 如果找到多筆資料，就拋出MultipleResultsFound例外
     pat = db.execute(
         select(PersonalAccessToken).where(
             PersonalAccessToken.token_prefix == token_prefix,
