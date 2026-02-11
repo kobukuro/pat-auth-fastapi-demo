@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     RATE_LIMIT_MAX_REQUESTS: int = 60
     RATE_LIMIT_WINDOW_SECONDS: int = 60
 
+    # Pydantic Settings的配置設定，用來控制類別如何讀取環境變數
+    # "env_file": ".env"：告訴 Pydantic 要從.env檔案讀取環境變數
+    # "extra": "ignore"：處理「環境變數裡有，但Settings類別沒定義」的欄位時，直接忽略多餘的環境變數
+    #                    雖然預設也是"ignore"，但明確指定可以增加可讀性，讓人一眼就知道這裡是有意識地忽略多餘的環境變數
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 
