@@ -44,6 +44,43 @@ class UserResponse(BaseModel):
     email: str
     created_at: datetime
 
+    # 這行是Pydantic v2的模型配置設定，用來告訴這個UserResponse類別可以「從物件屬性」建立實例
+    # 為什麼需要這個設定？
+    #   沒有這個設定的情況：
+    #   # 假設 user 是從資料庫查詢出來的SQLAlchemy ORM物件
+    #   user = db.query(User).first()
+    #   ❌ 這樣會報錯
+    #   response = UserResponse(
+    #       id=user.id,
+    #       email=user.email,
+    #       created_at=user.created_at
+    #   )
+    #
+    #   有這個設定後：
+    #   ✅ 可以直接傳入ORM物件，Pydantic會自動從屬性讀取資料
+    #   response = UserResponse.from_orm(user)  # Pydantic v1 語法
+    #   或
+    #   response = UserResponse.model_validate(user)  # Pydantic v2 語法
+    #
+    #   在 FastAPI 中更方便，可以直接回傳ORM物件
+    #   @router.get("/users/{user_id}")
+    #   def get_user(user_id: int, db: Session = Depends(get_db)):
+    #       user = db.query(User).get(user_id)
+    #       return user  # FastAPI 會自動用UserResponse轉換
+    #
+    #   實際應用場景
+    #   在這個專案中，當API端點需要回傳使用者資料時：
+    #
+    #   這個user物件是SQLAlchemy ORM模型
+    #   user = db.query(User).filter(User.email == email).first()
+    #
+    #   因為有 from_attributes=True，
+    #   FastAPI可以自動把這個ORM物件轉換成JSON回應
+    #   return UserResponse(
+    #       id=user.id,
+    #       email=user.email,
+    #       created_at=user.created_at
+    #   )
     model_config = ConfigDict(from_attributes=True)
 
 
