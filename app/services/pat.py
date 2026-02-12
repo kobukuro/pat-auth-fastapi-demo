@@ -60,6 +60,43 @@ def has_permission(db: Session, granted_scopes: list[Scope], required_scope: str
     return False
 
 
+def has_permission_with_granting_scope(
+    db: Session, granted_scopes: list[Scope], required_scope: str
+) -> tuple[bool, str | None]:
+    """
+    Check permission and return (has_permission, granting_scope_name).
+
+    This is an optimized version of has_permission() that also returns
+    which scope granted access, avoiding duplicate database queries.
+
+    Args:
+        db: Database session
+        granted_scopes: List of Scope objects the user has
+        required_scope: The scope being checked (e.g., "workspaces:read")
+
+    Returns:
+        tuple of (has_permission, granting_scope_name):
+        - (True, scope_name) if permission granted
+        - (False, None) if permission denied
+    """
+    required = db.execute(select(Scope).where(Scope.name == required_scope)).scalar_one_or_none()
+    if not required:
+        return False, None
+
+    # Find all granting scopes (same resource, level >= required level)
+    granting_scopes = []
+    for granted in granted_scopes:
+        if granted.resource == required.resource and granted.level >= required.level:
+            granting_scopes.append((granted.level, granted.name))
+
+    # Return highest level granting scope
+    if granting_scopes:
+        granting_scopes.sort(reverse=True)
+        return True, granting_scopes[0][1]
+
+    return False, None
+
+
 def get_pat_by_token(db: Session, token: str) -> PersonalAccessToken | None:
     """
     Lookup PAT by token using indexed prefix with hash filter.
