@@ -48,9 +48,19 @@ def has_permission(db: Session, granted_scopes: list[Scope], required_scope: str
 
     Higher level includes lower level within same resource.
     Does NOT inherit across different resources.
+
+    This function uses short-circuit logic: returns True as soon as
+    it finds ANY matching scope, without determining which is "best".
     """
-    has_perm, _ = has_permission_with_granting_scope(db, granted_scopes, required_scope)
-    return has_perm
+    required = db.execute(select(Scope).where(Scope.name == required_scope)).scalar_one_or_none()
+    if not required:
+        return False
+
+    for granted in granted_scopes:
+        if granted.resource == required.resource and granted.level >= required.level:
+            return True
+
+    return False
 
 
 def has_permission_with_granting_scope(
