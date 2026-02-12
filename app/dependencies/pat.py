@@ -4,7 +4,6 @@ PAT authentication dependencies for protected resource endpoints.
 This module provides dependencies for validating Personal Access Tokens (PATs)
 and extracting their associated scopes for authorization checks.
 """
-import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
