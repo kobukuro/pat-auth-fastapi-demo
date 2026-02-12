@@ -18,6 +18,8 @@ def generate_pat() -> tuple[str, str, str]:
             - prefix: First 8 chars for lookup
             - token_hash: SHA-256 hash for storage
     """
+    # secrets: Python標準函式庫，專門用於產生密碼學上安全的隨機數
+    # token_urlsafe(32): 產生 32 bytes 的隨機資料，並編碼成 URL 安全的 Base64 字串
     random_part = secrets.token_urlsafe(32)
     full_token = f"pat_{random_part}"
     prefix = full_token[:8]
