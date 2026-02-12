@@ -83,16 +83,22 @@ def has_permission_with_granting_scope(
     if not required:
         return False, None
 
-    # Find all granting scopes (same resource, level >= required level)
-    granting_scopes = []
+    # Find the best granting scope (same resource, highest level >= required level)
+    best_level: int | None = None
+    best_name: str | None = None
     for granted in granted_scopes:
         if granted.resource == required.resource and granted.level >= required.level:
-            granting_scopes.append((granted.level, granted.name))
+            if (
+                best_level is None
+                or granted.level > best_level
+                or (granted.level == best_level and (best_name is None or granted.name > best_name))
+            ):
+                best_level = granted.level
+                best_name = granted.name
 
-    # Return highest level granting scope
-    if granting_scopes:
-        granting_scopes.sort(reverse=True)
-        return True, granting_scopes[0][1]
+    # Return highest level granting scope (matching previous tuple-sort behavior)
+    if best_name is not None:
+        return True, best_name
 
     return False, None
 
