@@ -21,8 +21,8 @@ security = HTTPBearer()
 
 
 def get_pat_with_scopes(
-        credentials: HTTPAuthorizationCredentials = Depends(security),
-        db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
 ) -> tuple[PersonalAccessToken, list[Scope]]:
     """
     Validate PAT token and return PAT record with scopes.
@@ -135,11 +135,10 @@ def require_scope(required_scope: str):
     Returns:
         A dependency that validates PAT has the required scope and returns AuthContext
     """
-
     def dependency(
-            request: Request,
-            pat_data: tuple[PersonalAccessToken, list[Scope]] = Depends(get_pat_with_scopes),
-            db: Session = Depends(get_db),
+        request: Request,
+        pat_data: tuple[PersonalAccessToken, list[Scope]] = Depends(get_pat_with_scopes),
+        db: Session = Depends(get_db),
     ) -> AuthContext:
         pat, scopes = pat_data
 
@@ -173,7 +172,7 @@ def require_scope(required_scope: str):
 
 
 def _find_granting_scope(
-        db: Session, scopes: list[Scope], required_scope: str
+    db: Session, scopes: list[Scope], required_scope: str
 ) -> str | None:
     """
     Find which scope from the list granted access to required_scope.
@@ -201,8 +200,8 @@ def _find_granting_scope(
     granting_scopes = []
     for granted in scopes:
         if (
-                granted.resource == required.resource
-                and granted.level >= required.level
+            granted.resource == required.resource
+            and granted.level >= required.level
         ):
             granting_scopes.append((granted.level, granted.name))
 
