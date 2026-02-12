@@ -9,13 +9,12 @@ from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.pat import PersonalAccessToken
 from app.models.scope import Scope
-from app.services.pat import has_permission
+from app.services.pat import has_permission_with_granting_scope
 
 security = HTTPBearer()
 
@@ -142,8 +141,12 @@ def require_scope(required_scope: str):
     ) -> AuthContext:
         pat, scopes = pat_data
 
-        # Check if user has required scope
-        if not has_permission(db, scopes, required_scope):
+        # Check if user has required scope (optimized: single DB query)
+        has_perm, granted_by = has_permission_with_granting_scope(
+            db, scopes, required_scope
+        )
+
+        if not has_perm:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
@@ -156,9 +159,6 @@ def require_scope(required_scope: str):
                 },
             )
 
-        # Find which scope granted access
-        granted_by = _find_granting_scope(db, scopes, required_scope)
-
         return AuthContext(
             pat=pat,
             scopes=scopes,
@@ -169,45 +169,3 @@ def require_scope(required_scope: str):
         )
 
     return dependency
-
-
-def _find_granting_scope(
-    db: Session, scopes: list[Scope], required_scope: str
-) -> str | None:
-    """
-    Find which scope from the list granted access to required_scope.
-
-    Returns the highest-level scope that satisfies the requirement.
-    If multiple scopes grant access, returns the one with the highest level.
-
-    Args:
-        db: Database session
-        scopes: List of Scope objects the user has
-        required_scope: The scope being checked
-
-    Returns:
-        The name of the scope that granted access, or None if none found
-    """
-    # Get required scope from DB
-    required = db.execute(
-        select(Scope).where(Scope.name == required_scope)
-    ).scalar_one_or_none()
-
-    if not required:
-        return None
-
-    # Find all granting scopes (same resource, level >= required level)
-    granting_scopes = []
-    for granted in scopes:
-        if (
-            granted.resource == required.resource
-            and granted.level >= required.level
-        ):
-            granting_scopes.append((granted.level, granted.name))
-
-    # Return highest level granting scope
-    if granting_scopes:
-        granting_scopes.sort(reverse=True)
-        return granting_scopes[0][1]
-
-    return None
