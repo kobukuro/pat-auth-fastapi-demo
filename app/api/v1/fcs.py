@@ -958,8 +958,6 @@ async def trigger_statistics_calculation(
         )
 
     # 4. Check for existing in-progress task
-    from sqlalchemy import or_
-
     existing_task = db.query(BackgroundTask).filter(
         BackgroundTask.fcs_file_id == (fcs_file.id if fcs_file else None),
         BackgroundTask.task_type == "statistics",
