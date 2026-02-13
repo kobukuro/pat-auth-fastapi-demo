@@ -89,8 +89,14 @@ def setup_database():
     try:
         command.downgrade(alembic_cfg, "base")
     except Exception:
-        # If downgrade fails, fall back to drop_all
+        # If downgrade fails, fall back to drop_all and reset Alembic version state
         Base.metadata.drop_all(bind=engine)
+        try:
+            # Ensure Alembic does not think the DB is still at head
+            command.stamp(alembic_cfg, "base")
+        except Exception:
+            # If stamping fails, leave teardown best-effort without raising
+            pass
 
 
 @pytest.fixture
