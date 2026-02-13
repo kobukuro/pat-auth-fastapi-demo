@@ -218,13 +218,48 @@ class LocalStorageBackend(StorageBackend):
         temp_path = self._get_temp_file_path(session_id, filename)
 
         try:
+            """
+            建立暫存檔案的父目錄
+            .parent: Path物件的屬性，取得父目錄路徑
+            parents=True: 如果父目錄不存在，會連同上層目錄一起建立（遞迴建立）
+            exist_ok=True: 如果目錄已經存在，不會拋出錯誤
+            """
             # Ensure directory exists
             temp_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Create empty file (pre-allocate space for performance)
+            """
+            aiofiles.open()：使用非同步方式開啟檔案（避免程式阻塞）
+            'wb'：寫入模式 + 二進位模式
+                - w (write)：覆寫模式，若檔案存在會清空後重寫
+                - b (binary)：以位元組形式處理資料（適合上傳檔案）
+            async with：非同步上下文管理器，確保檔案正確關閉
+            as f：將檔案物件存入變數 f
+            """
             async with aiofiles.open(temp_path, 'wb') as f:
                 # Pre-allocate file space (optional, for performance)
                 # This creates a sparse file on supported filesystems
+                """
+                f.truncate(file_size)：調整檔案大小為指定的位元組數
+                    - await：等待這個非同步操作完成
+                    - file_size：最終檔案應有的完整大小
+                這段程式碼是在分塊上傳初始化時預先配置磁碟空間：
+                1. 避免磁碟空間不足的錯誤：一開始就確保有足夠空間
+                2. 提升效能：避免每個區塊寫入時都需要調整檔案大小
+                3. 減少磁碟碎片：連續配置空間比逐步擴充更有效率
+                
+                實際範例:
+                假設上傳一個 100MB 的 FCS 檔案：
+                # 初始化時就建立一個 100MB 的空殼檔案
+                await f.truncate(100 * 1024 * 1024)  # 預留 100MB空間
+                
+                # 後續分塊寫入時，直接填入資料即可
+                # 第 1 塊 (0-5MB) → 寫入位置 0
+                # 第 2 塊 (5-10MB) → 寫入位置 5MB
+                # ...
+                
+                這樣就不需要每寫入一個區塊就調整一次檔案大小，可以減少磁碟 I/O 的次數。
+                """
                 await f.truncate(file_size)
 
             return str(temp_path)
