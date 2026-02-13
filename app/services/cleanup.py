@@ -11,7 +11,7 @@ from sqlalchemy import select, or_
 
 from app.database import SessionLocal
 from app.logging_config import setup_logging
-from app.models.background_task import BackgroundTask, TaskType
+from app.models.background_task import BackgroundTask, TaskType, TaskStatus
 from app.storage.base import StorageBackend
 from app.dependencies.storage import get_storage
 
@@ -52,7 +52,7 @@ async def cleanup_expired_upload_sessions(
         # Find expired pending/uploading/finalizing sessions
         expired_sessions = db.query(BackgroundTask).filter(
             BackgroundTask.task_type == TaskType.CHUNKED_UPLOAD,
-            BackgroundTask.status.in_(["pending", "processing", "finalizing", "failed"]),
+            BackgroundTask.status.in_([TaskStatus.PENDING, TaskStatus.PROCESSING, TaskStatus.FINALIZING, TaskStatus.FAILED]),
             BackgroundTask.expires_at < datetime.now(),
         ).all()
 
@@ -73,7 +73,7 @@ async def cleanup_expired_upload_sessions(
                 )
 
             # Mark as expired
-            session.status = "expired"
+            session.status = TaskStatus.EXPIRED
 
         db.commit()
         logger.info(f"Cleaned up {len(expired_sessions)} expired upload sessions")
@@ -119,7 +119,7 @@ async def cleanup_orphaned_temp_files(
             for row in db.query(BackgroundTask)
             .filter(
                 BackgroundTask.task_type == TaskType.CHUNKED_UPLOAD,
-                BackgroundTask.status.in_(["pending", "processing", "finalizing"]),
+                BackgroundTask.status.in_([TaskStatus.PENDING, TaskStatus.PROCESSING, TaskStatus.FINALIZING]),
             )
             .all()
         )

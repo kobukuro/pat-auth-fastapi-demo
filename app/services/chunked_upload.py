@@ -8,7 +8,7 @@ from datetime import datetime
 
 from app.dependencies.storage import get_storage
 from app.logging_config import setup_logging
-from app.models.background_task import BackgroundTask
+from app.models.background_task import BackgroundTask, TaskStatus
 from app.models.fcs_file import FCSFile
 from app.services.fcs import get_fcs_parameters
 from app.storage.base import StorageBackend
@@ -50,7 +50,7 @@ async def finalize_chunked_upload(
             raise ValueError(f"Upload session {task_id} not found")
 
         # Idempotency: Skip if already completed
-        if task.status == "completed":
+        if task.status == TaskStatus.COMPLETED:
             logger.info(f"Task {task_id} already completed, skipping")
             if task.result:
                 return task.result
@@ -63,7 +63,7 @@ async def finalize_chunked_upload(
                 }
 
         # Idempotency: Check if already finalizing
-        if task.status == "finalizing":
+        if task.status == TaskStatus.FINALIZING:
             logger.info(f"Task {task_id} is already finalizing")
             # Wait or return error (simplified: return error)
             raise ValueError("Upload is finalizing, please wait")
@@ -91,7 +91,7 @@ async def finalize_chunked_upload(
             )
         except Exception as e:
             logger.error(f"Failed to finalize upload: {str(e)}", exc_info=True)
-            task.status = "failed"
+            task.status = TaskStatus.FAILED
             task.result = {"error_message": f"Failed to finalize upload: {str(e)}"}
             task.completed_at = datetime.now()
             db.commit()
@@ -104,7 +104,7 @@ async def finalize_chunked_upload(
             logger.error(f"Failed to parse FCS file: {str(e)}", exc_info=True)
             # Clean up the finalized file
             await storage.delete_file(file_id)
-            task.status = "failed"
+            task.status = TaskStatus.FAILED
             task.result = {"error_message": f"Invalid FCS file: {str(e)}"}
             task.completed_at = datetime.now()
             db.commit()
@@ -131,7 +131,7 @@ async def finalize_chunked_upload(
 
             # Update background task
             task.fcs_file_id = fcs_file.id
-            task.status = "completed"
+            task.status = TaskStatus.COMPLETED
             task.result = {
                 "file_id": fcs_file.file_id,
                 "filename": fcs_file.filename,
@@ -155,7 +155,7 @@ async def finalize_chunked_upload(
             logger.error(f"Failed to save FCS file metadata: {str(e)}", exc_info=True)
             # Clean up the finalized file
             await storage.delete_file(file_id)
-            task.status = "failed"
+            task.status = TaskStatus.FAILED
             task.result = {"error_message": f"Failed to save file metadata: {str(e)}"}
             task.completed_at = datetime.now()
             db.commit()
