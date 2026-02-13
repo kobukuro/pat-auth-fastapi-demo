@@ -5,9 +5,10 @@ This module defines the BackgroundTask model for storing async task metadata,
 for US-MVP-003 statistics calculation feature.
 """
 from datetime import datetime
+from enum import Enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, String, Index, func, DateTime
+from sqlalchemy import Enum as SQLEnum, ForeignKey, String, Index, func, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
@@ -16,6 +17,13 @@ from app.database import Base
 if TYPE_CHECKING:
     from app.models.fcs_file import FCSFile
     from app.models.user import User
+
+
+class TaskType(str, Enum):
+    """Background task type enumeration."""
+
+    STATISTICS = "statistics"
+    CHUNKED_UPLOAD = "chunked_upload"
 
 
 class BackgroundTask(Base):
@@ -41,7 +49,7 @@ class BackgroundTask(Base):
     __tablename__ = "background_tasks"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    task_type: Mapped[str] = mapped_column(String(50))  # "statistics" or "chunked_upload"
+    task_type: Mapped[TaskType] = mapped_column(SQLEnum(TaskType))
     fcs_file_id: Mapped[int | None] = mapped_column(
         ForeignKey("fcs_files.id"), nullable=True
     )

@@ -17,7 +17,7 @@ from app.database import SessionLocal, get_db
 from app.dependencies.pat import AuthContext, get_pat_with_scopes, require_scope
 from app.dependencies.storage import get_storage
 from app.logging_config import setup_logging
-from app.models.background_task import BackgroundTask
+from app.models.background_task import BackgroundTask, TaskType
 from app.models.fcs_statistics import FCSStatistics
 from app.models.pat import PersonalAccessToken
 from app.models.scope import Scope
@@ -331,7 +331,6 @@ async def init_chunked_upload(
     ```
     """
     from datetime import datetime, timedelta
-    from app.models.background_task import BackgroundTask
 
     # 1. Validate filename
     if not filename.lower().endswith(tuple(settings.ALLOWED_FCS_EXTENSIONS)):
@@ -352,7 +351,7 @@ async def init_chunked_upload(
 
     # 3. Create BackgroundTask for upload session
     task = BackgroundTask(
-        task_type="chunked_upload",
+        task_type=TaskType.CHUNKED_UPLOAD,
         status="pending",
         user_id=auth.pat.user_id,
         expires_at=datetime.now() + timedelta(hours=24),
@@ -465,8 +464,6 @@ async def upload_chunk(
       -F "chunk=@-"
     ```
     """
-    from app.models.background_task import BackgroundTask
-
     # 1. Get upload session
     task = db.query(BackgroundTask).filter_by(id=task_id).first()
 
@@ -481,7 +478,7 @@ async def upload_chunk(
         )
 
     # 1.5. Validate task type
-    if task.task_type != "chunked_upload":
+    if task.task_type != TaskType.CHUNKED_UPLOAD:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
@@ -676,8 +673,6 @@ async def abort_chunked_upload(
       -F "task_id=123"
     ```
     """
-    from app.models.background_task import BackgroundTask
-
     # 1. Get upload session
     task = db.query(BackgroundTask).filter_by(id=task_id).first()
 
@@ -820,7 +815,7 @@ async def get_fcs_statistics_endpoint(
 
     in_progress_task = db.query(BackgroundTask).filter(
         BackgroundTask.fcs_file_id == fcs_file_id_for_task,
-        BackgroundTask.task_type == "statistics",
+        BackgroundTask.task_type == TaskType.STATISTICS,
         or_(
             BackgroundTask.status == "pending",
             BackgroundTask.status == "processing",
@@ -903,8 +898,6 @@ async def trigger_statistics_calculation(
         HTTPException 403: If private file and user is not owner
         HTTPException 404: If file_id not found
     """
-    from app.models.background_task import BackgroundTask
-
     # 1. Determine file source
     if request.file_id is None:
         # Sample file
@@ -962,7 +955,7 @@ async def trigger_statistics_calculation(
     # 4. Check for existing in-progress task
     existing_task = db.query(BackgroundTask).filter(
         BackgroundTask.fcs_file_id == (fcs_file.id if fcs_file else None),
-        BackgroundTask.task_type == "statistics",
+        BackgroundTask.task_type == TaskType.STATISTICS,
         or_(
             BackgroundTask.status == "pending",
             BackgroundTask.status == "processing",
@@ -982,7 +975,7 @@ async def trigger_statistics_calculation(
 
     # 5. Create background task (using auto-increment id as task_id)
     task = BackgroundTask(
-        task_type="statistics",
+        task_type=TaskType.STATISTICS,
         fcs_file_id=fcs_file.id if fcs_file else None,
         status="pending",
         user_id=auth.pat.user_id,
@@ -1037,7 +1030,7 @@ def _is_task_public(db: Session, task: BackgroundTask) -> bool:
     Returns:
         True if task is public, False if private
     """
-    if task.task_type == "chunked_upload":
+    if task.task_type == TaskType.CHUNKED_UPLOAD:
         # Check extra_data first (handles in-progress uploads)
         if task.extra_data and "is_public" in task.extra_data:
             return task.extra_data["is_public"]
@@ -1050,7 +1043,7 @@ def _is_task_public(db: Session, task: BackgroundTask) -> bool:
         logger.warning(f"Chunked upload task {task.id} has no is_public info, defaulting to private")
         return False
 
-    elif task.task_type == "statistics":
+    elif task.task_type == TaskType.STATISTICS:
         # NULL fcs_file_id means sample file (public)
         if task.fcs_file_id is None:
             return True
@@ -1110,8 +1103,6 @@ async def get_task_status_endpoint(
         HTTPException 404: If task not found
         HTTPException 403: If user doesn't own the task or lacks required scope
     """
-    from app.models.background_task import BackgroundTask
-
     pat, scopes = pat_data
 
     # 1. Get task first (need task_type to determine required scope)
@@ -1130,9 +1121,9 @@ async def get_task_status_endpoint(
 
     # 2. Determine required scope based on task_type
     # Dynamic permission: upload tasks need fcs:write, statistics need fcs:analyze
-    if task.task_type == "chunked_upload":
+    if task.task_type == TaskType.CHUNKED_UPLOAD:
         required_scope = "fcs:write"
-    elif task.task_type == "statistics":
+    elif task.task_type == TaskType.STATISTICS:
         required_scope = "fcs:analyze"
     else:
         # Unknown task type - use highest level for safety
@@ -1177,7 +1168,7 @@ async def get_task_status_endpoint(
         "created_at": task.created_at.isoformat(),
     }
 
-    if task.task_type == "statistics":
+    if task.task_type == TaskType.STATISTICS:
         # Statistics task - return existing format
         if task.status == "completed" and task.result:
             response_data["completed_at"] = task.completed_at.isoformat()
@@ -1186,7 +1177,7 @@ async def get_task_status_endpoint(
             response_data["completed_at"] = task.completed_at.isoformat()
             response_data["result"] = task.result
 
-    elif task.task_type == "chunked_upload":
+    elif task.task_type == TaskType.CHUNKED_UPLOAD:
         # Chunked upload task - return upload progress or result
         if task.status == "processing":
             # Upload in progress - return progress from extra_data

@@ -3,7 +3,7 @@ Integration tests for cleanup service.
 """
 import pytest
 
-from app.models.background_task import BackgroundTask
+from app.models.background_task import BackgroundTask, TaskType
 from app.models.user import User
 from app.services.cleanup import cleanup_expired_upload_sessions, cleanup_orphaned_temp_files
 
@@ -30,7 +30,7 @@ async def test_cleanup_orphaned_temp_files(db, tmp_path, test_user):
 
     # Create an active upload session (not orphaned)
     active_task = BackgroundTask(
-        task_type="chunked_upload",
+        task_type=TaskType.CHUNKED_UPLOAD,
         status="processing",
         user_id=test_user.id,
         extra_data={"filename": "active.fcs"},
@@ -78,7 +78,7 @@ async def test_cleanup_expired_upload_sessions(db, tmp_path, test_user):
 
     # Create an expired upload session
     expired_task = BackgroundTask(
-        task_type="chunked_upload",
+        task_type=TaskType.CHUNKED_UPLOAD,
         status="processing",
         user_id=test_user.id,
         expires_at=datetime.now() - timedelta(hours=25),  # Expired
