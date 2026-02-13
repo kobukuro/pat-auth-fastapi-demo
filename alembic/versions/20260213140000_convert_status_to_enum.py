@@ -33,11 +33,13 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade schema: Revert status from ENUM to VARCHAR(20)."""
 
-    # 1. Revert column to VARCHAR(20)
-    op.execute(
-        "ALTER TABLE background_tasks "
-        "ALTER COLUMN status TYPE VARCHAR(20)"
-    )
+    # 1. Revert column to VARCHAR(20) and restore original default
+    op.execute("""
+        ALTER TABLE background_tasks
+        ALTER COLUMN status DROP DEFAULT,
+        ALTER COLUMN status TYPE VARCHAR(20) USING status::text,
+        ALTER COLUMN status SET DEFAULT 'pending'
+    """)
 
     # 2. Drop ENUM type
     op.execute("DROP TYPE taskstatus")
