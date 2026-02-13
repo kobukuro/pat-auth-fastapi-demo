@@ -292,7 +292,7 @@ def test_upload_valid_fcs_file_accepted(client, auth_pat):
 
 def test_upload_chunk_with_wrong_task_type_returns_400(client, auth_pat, db):
     """Test that uploading a chunk with a statistics task_id returns 400."""
-    from app.models.background_task import BackgroundTask
+    from app.models.background_task import BackgroundTask, TaskType
     from app.models.user import User
 
     # Get the actual user_id from the database
@@ -302,7 +302,7 @@ def test_upload_chunk_with_wrong_task_type_returns_400(client, auth_pat, db):
     # Create a statistics task (not chunked upload)
     stats_task = BackgroundTask(
         user_id=user.id,
-        task_type="statistics",
+        task_type=TaskType.STATISTICS,
         status="pending",
         extra_data={"file_id": 1}
     )

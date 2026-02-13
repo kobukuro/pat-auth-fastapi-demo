@@ -778,7 +778,7 @@ def test_fcs_statistics_returns_404_when_not_calculated(client):
 
 def test_fcs_statistics_returns_202_when_calculation_in_progress(client, db):
     """Test GET /statistics returns 202 when calculation is in progress."""
-    from app.models.background_task import BackgroundTask
+    from app.models.background_task import BackgroundTask, TaskType
     from app.models.user import User
 
     jwt = _get_jwt(client)
@@ -790,7 +790,7 @@ def test_fcs_statistics_returns_202_when_calculation_in_progress(client, db):
 
     # Create an in-progress task for sample file (fcs_file_id = NULL)
     task = BackgroundTask(
-        task_type="statistics",
+        task_type=TaskType.STATISTICS,
         fcs_file_id=None,  # NULL for sample file
         status="pending",
         user_id=user.id,  # Use actual user ID
@@ -839,7 +839,6 @@ def test_fcs_statistics_calculate_triggers_background_task(client):
 
 def test_fcs_statistics_calculate_returns_cached_if_exists(client, db):
     """Test POST /statistics/calculate returns cached results if already calculated."""
-    from app.models.background_task import BackgroundTask
     from app.models.fcs_statistics import FCSStatistics
     from app.services.fcs_statistics import calculate_fcs_statistics
 
@@ -905,7 +904,6 @@ def test_fcs_task_status_returns_404_for_invalid_task(client):
 
 def test_fcs_statistics_requires_analyze_scope(client, db):
     """Test that fcs:analyze scope is required (not just read)."""
-    from app.services.pat import has_permission
 
     # fcs:read should NOT grant fcs:analyze access
     assert _check_has_permission(db, ["fcs:read"], "fcs:analyze") is False
@@ -1479,7 +1477,6 @@ def test_fcs_upload_with_invalid_file_sizes(client):
 
 def test_chunk_oversized_rejected(client, db):
     """Test that oversized chunks are rejected with 400 error."""
-    from app.models.background_task import BackgroundTask
 
     jwt = _get_jwt(client)
     pat_write = _create_pat(client, jwt, ["fcs:write"])
@@ -1643,8 +1640,6 @@ def test_last_chunk_can_be_smaller(client, db):
 
 def test_chunk_offset_calculation(client, db):
     """Test that chunks are written at correct offsets."""
-    import time
-    from app.models.background_task import BackgroundTask
     from app.storage.local import LocalStorageBackend
     from app.config import settings
     from io import BytesIO
@@ -1775,7 +1770,6 @@ def test_private_chunked_upload_task_denied_for_non_owner(client):
 
 def test_public_statistics_task_accessible_by_other_user(client, db):
     """User 2 can view User 1's public file statistics task."""
-    from app.models.background_task import BackgroundTask
 
     # User 1 uploads public file
     jwt1 = _get_jwt_with_email(client, "user1_public_stats@example.com")
@@ -1810,7 +1804,6 @@ def test_public_statistics_task_accessible_by_other_user(client, db):
 
 def test_private_statistics_task_denied_for_non_owner(client, db):
     """User 2 cannot view User 1's private file statistics task."""
-    from app.models.background_task import BackgroundTask
 
     # User 1 uploads private file
     jwt1 = _get_jwt_with_email(client, "user1_private_stats@example.com")
@@ -1913,7 +1906,6 @@ def test_public_in_progress_upload_task_accessible_by_other_user(client):
 
 def test_sample_file_statistics_task_is_public(client):
     """Statistics tasks for sample files (no fcs_file_id) are public."""
-    from app.models.background_task import BackgroundTask
 
     # User 1 creates statistics task for sample file (no file_id parameter)
     jwt1 = _get_jwt_with_email(client, "user1_sample_stats@example.com")
