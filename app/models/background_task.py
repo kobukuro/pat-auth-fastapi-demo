@@ -26,6 +26,16 @@ class TaskType(str, Enum):
     CHUNKED_UPLOAD = "chunked_upload"
 
 
+class TaskStatus(str, Enum):
+    """Background task status enumeration."""
+    PENDING = "pending"
+    PROCESSING = "processing"
+    FINALIZING = "finalizing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    EXPIRED = "expired"
+
+
 class BackgroundTask(Base):
     """
     Background task model for async job tracking.
@@ -53,8 +63,8 @@ class BackgroundTask(Base):
     fcs_file_id: Mapped[int | None] = mapped_column(
         ForeignKey("fcs_files.id"), nullable=True
     )
-    status: Mapped[str] = mapped_column(String(20), default="pending")
-    # Status values: pending, processing, finalizing, completed, failed, expired
+    status: Mapped[TaskStatus] = mapped_column(SQLEnum(TaskStatus), default=TaskStatus.PENDING)
+    # Status values defined in TaskStatus enum
     result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # For statistics: {total_events, statistics}
     # For chunked_upload: {filename, file_size, uploaded_bytes, uploaded_chunks, total_chunks, ...}

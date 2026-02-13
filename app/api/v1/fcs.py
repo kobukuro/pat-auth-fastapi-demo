@@ -17,7 +17,7 @@ from app.database import SessionLocal, get_db
 from app.dependencies.pat import AuthContext, get_pat_with_scopes, require_scope
 from app.dependencies.storage import get_storage
 from app.logging_config import setup_logging
-from app.models.background_task import BackgroundTask, TaskType
+from app.models.background_task import BackgroundTask, TaskType, TaskStatus
 from app.models.fcs_statistics import FCSStatistics
 from app.models.pat import PersonalAccessToken
 from app.models.scope import Scope
@@ -352,7 +352,7 @@ async def init_chunked_upload(
     # 3. Create BackgroundTask for upload session
     task = BackgroundTask(
         task_type=TaskType.CHUNKED_UPLOAD,
-        status="pending",
+        status=TaskStatus.PENDING,
         user_id=auth.pat.user_id,
         expires_at=datetime.now() + timedelta(hours=24),
         extra_data={
@@ -383,12 +383,12 @@ async def init_chunked_upload(
 
         # Update task with temp path and status
         task.extra_data["temp_file_path"] = temp_path
-        task.status = "processing"
+        task.status = TaskStatus.PROCESSING
         db.commit()
 
     except Exception as e:
         logger.error(f"Failed to init chunked upload: {str(e)}", exc_info=True)
-        task.status = "failed"
+        task.status = TaskStatus.FAILED
         task.result = {"error_message": "Failed to initialize upload"}
         db.commit()
         raise HTTPException(
@@ -416,7 +416,7 @@ async def init_chunked_upload(
             "file_size": file_size,
             "chunk_size": chunk_size,
             "total_chunks": total_chunks,
-            "status": "processing",
+            "status": TaskStatus.PROCESSING,
             "expires_at": task.expires_at.isoformat() if task.expires_at else None,
         },
     )
@@ -500,7 +500,7 @@ async def upload_chunk(
         )
 
     # 3. Validate session status
-    if task.status not in ["pending", "processing"]:
+    if task.status not in [TaskStatus.PENDING, TaskStatus.PROCESSING]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
@@ -593,7 +593,7 @@ async def upload_chunk(
 
     except Exception as e:
         logger.error(f"Failed to save chunk {chunk_number}: {str(e)}", exc_info=True)
-        task.status = "failed"
+        task.status = TaskStatus.FAILED
         task.result = {"error_message": "Failed to save chunk"}
         db.commit()
         raise HTTPException(
@@ -608,7 +608,7 @@ async def upload_chunk(
     # 7. Auto-trigger completion on last chunk
     is_last_chunk = (task.extra_data["uploaded_chunks"] == task.extra_data["total_chunks"])
 
-    if is_last_chunk and task.status not in ["finalizing", "completed"]:
+    if is_last_chunk and task.status not in [TaskStatus.FINALIZING, TaskStatus.COMPLETED]:
         # Trigger background completion task (don't set status here, let the background task handle it)
         from app.services.chunked_upload import finalize_chunked_upload
         background_tasks.add_task(
@@ -698,7 +698,7 @@ async def abort_chunked_upload(
         )
 
     # 3. Cannot abort completed sessions
-    if task.status == "completed":
+    if task.status == TaskStatus.COMPLETED:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
@@ -817,8 +817,8 @@ async def get_fcs_statistics_endpoint(
         BackgroundTask.fcs_file_id == fcs_file_id_for_task,
         BackgroundTask.task_type == TaskType.STATISTICS,
         or_(
-            BackgroundTask.status == "pending",
-            BackgroundTask.status == "processing",
+            BackgroundTask.status == TaskStatus.PENDING,
+            BackgroundTask.status == TaskStatus.PROCESSING,
         ),
     ).first()
 
@@ -943,7 +943,7 @@ async def trigger_statistics_calculation(
             success=True,
             data={
                 "task_id": None,
-                "status": "completed",
+                "status": TaskStatus.COMPLETED,
                 "message": "Statistics already calculated",
                 "result": {
                     "total_events": cached.total_events,
@@ -957,8 +957,8 @@ async def trigger_statistics_calculation(
         BackgroundTask.fcs_file_id == (fcs_file.id if fcs_file else None),
         BackgroundTask.task_type == TaskType.STATISTICS,
         or_(
-            BackgroundTask.status == "pending",
-            BackgroundTask.status == "processing",
+            BackgroundTask.status == TaskStatus.PENDING,
+            BackgroundTask.status == TaskStatus.PROCESSING,
         ),
     ).first()
 
@@ -977,7 +977,7 @@ async def trigger_statistics_calculation(
     task = BackgroundTask(
         task_type=TaskType.STATISTICS,
         fcs_file_id=fcs_file.id if fcs_file else None,
-        status="pending",
+        status=TaskStatus.PENDING,
         user_id=auth.pat.user_id,
     )
     db.add(task)
@@ -1170,16 +1170,16 @@ async def get_task_status_endpoint(
 
     if task.task_type == TaskType.STATISTICS:
         # Statistics task - return existing format
-        if task.status == "completed" and task.result:
+        if task.status == TaskStatus.COMPLETED and task.result:
             response_data["completed_at"] = task.completed_at.isoformat()
             response_data["result"] = task.result
-        elif task.status == "failed" and task.result:
+        elif task.status == TaskStatus.FAILED and task.result:
             response_data["completed_at"] = task.completed_at.isoformat()
             response_data["result"] = task.result
 
     elif task.task_type == TaskType.CHUNKED_UPLOAD:
         # Chunked upload task - return upload progress or result
-        if task.status == "processing":
+        if task.status == TaskStatus.PROCESSING:
             # Upload in progress - return progress from extra_data
             extra_data = task.extra_data or {}
             total_bytes = extra_data.get("file_size", 0)
@@ -1195,14 +1195,14 @@ async def get_task_status_endpoint(
                 "progress_percentage": progress_percentage,
             }
 
-        elif task.status == "finalizing":
+        elif task.status == TaskStatus.FINALIZING:
             # Parsing FCS file
             response_data["result"] = {
                 "message": "Parsing FCS file...",
                 "filename": task.extra_data.get("filename", "") if task.extra_data else "",
             }
 
-        elif task.status == "completed":
+        elif task.status == TaskStatus.COMPLETED:
             # Upload completed - return FCSFile info with download URL
             response_data["completed_at"] = task.completed_at.isoformat()
             if task.result:
@@ -1228,7 +1228,7 @@ async def get_task_status_endpoint(
                     ),
                 }
 
-        elif task.status == "failed":
+        elif task.status == TaskStatus.FAILED:
             # Upload failed
             response_data["completed_at"] = task.completed_at.isoformat() if task.completed_at else None
             response_data["result"] = task.result or {"error_message": "Upload failed"}

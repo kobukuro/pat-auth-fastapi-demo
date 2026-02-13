@@ -48,7 +48,7 @@ async def calculate_statistics_task(
             logger.error(f"Background task {task_id} not found")
             return
 
-        task.status = "processing"
+        task.status = TaskStatus.PROCESSING
         db.commit()
 
         logger.info(
@@ -68,7 +68,7 @@ async def calculate_statistics_task(
         db.add(stats_record)
 
         # Mark task as completed
-        task.status = "completed"
+        task.status = TaskStatus.COMPLETED
         task.result = {
             "total_events": result.total_events,
             "statistics": result.statistics,
@@ -84,7 +84,7 @@ async def calculate_statistics_task(
     except Exception as e:
         # Mark task as failed
         if "task" in locals():
-            task.status = "failed"
+            task.status = TaskStatus.FAILED
             task.result = {"error": str(e)}
             task.completed_at = datetime.now(timezone.utc)
             db.commit()
@@ -98,4 +98,4 @@ async def calculate_statistics_task(
 
 # Import BackgroundTask at module level to avoid circular imports
 # This is safe because the function is async and runs in a separate context
-from app.models.background_task import BackgroundTask
+from app.models.background_task import BackgroundTask, TaskStatus
