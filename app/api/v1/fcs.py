@@ -416,7 +416,7 @@ async def init_chunked_upload(
             "file_size": file_size,
             "chunk_size": chunk_size,
             "total_chunks": total_chunks,
-            "status": "processing",
+            "status": TaskStatus.PROCESSING,
             "expires_at": task.expires_at.isoformat() if task.expires_at else None,
         },
     )
@@ -943,7 +943,7 @@ async def trigger_statistics_calculation(
             success=True,
             data={
                 "task_id": None,
-                "status": "completed",
+                "status": TaskStatus.COMPLETED,
                 "message": "Statistics already calculated",
                 "result": {
                     "total_events": cached.total_events,
@@ -1170,10 +1170,10 @@ async def get_task_status_endpoint(
 
     if task.task_type == TaskType.STATISTICS:
         # Statistics task - return existing format
-        if task.status == "completed" and task.result:
+        if task.status == TaskStatus.COMPLETED and task.result:
             response_data["completed_at"] = task.completed_at.isoformat()
             response_data["result"] = task.result
-        elif task.status == "failed" and task.result:
+        elif task.status == TaskStatus.FAILED and task.result:
             response_data["completed_at"] = task.completed_at.isoformat()
             response_data["result"] = task.result
 
@@ -1202,7 +1202,7 @@ async def get_task_status_endpoint(
                 "filename": task.extra_data.get("filename", "") if task.extra_data else "",
             }
 
-        elif task.status == "completed":
+        elif task.status == TaskStatus.COMPLETED:
             # Upload completed - return FCSFile info with download URL
             response_data["completed_at"] = task.completed_at.isoformat()
             if task.result:
