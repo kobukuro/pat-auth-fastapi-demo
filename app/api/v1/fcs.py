@@ -5,14 +5,12 @@ This module provides API endpoints for FCS (Flow Cytometry Standard) file operat
 including parameter retrieval, events query, file upload, and statistics calculation.
 """
 import time
-
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse
-
-from sqlalchemy.orm import Session
 from sqlalchemy import or_
+from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import SessionLocal, get_db
@@ -20,16 +18,14 @@ from app.dependencies.pat import AuthContext, get_pat_with_scopes, require_scope
 from app.dependencies.storage import get_storage
 from app.logging_config import setup_logging
 from app.models.background_task import BackgroundTask
-from app.models.fcs_file import FCSFile
+from app.models.fcs_statistics import FCSStatistics
 from app.models.pat import PersonalAccessToken
 from app.models.scope import Scope
-from app.models.fcs_statistics import FCSStatistics
 from app.schemas.common import APIResponse
 from app.schemas.fcs import (
     ChunkedUploadChunkResponse,
     ChunkedUploadInitResponse,
     FCSEventsResponseData,
-    FCSFileResponse,
     FCSParametersResponseData,
     FCSStatisticsResponseData,
     StatisticsCalculateRequest,
@@ -44,7 +40,6 @@ from app.services.fcs import (
 )
 from app.storage.base import StorageBackend
 from app.utils.authorization import check_permission_and_get_context
-from app.utils.ids import generate_short_id
 
 router = APIRouter(prefix="/fcs", tags=["fcs"])
 
@@ -122,7 +117,6 @@ def get_fcs_parameters_endpoint(
         if fcs_file and not fcs_file.is_public:
             # Get user_id from the PAT
             # The PAT is associated with a user through the tokens
-            from sqlalchemy import select
 
             # Check if the authenticated token belongs to the file owner
             pat_user_id = None
@@ -250,7 +244,6 @@ def get_fcs_events_endpoint(
 
         # Permission check for private files
         if fcs_file and not fcs_file.is_public:
-            from sqlalchemy import select
 
             pat_user_id = auth.pat.user_id if auth.pat else None
             if fcs_file.user_id != pat_user_id:
@@ -965,7 +958,7 @@ async def trigger_statistics_calculation(
         )
 
     # 4. Check for existing in-progress task
-    from sqlalchemy import select, or_
+    from sqlalchemy import or_
 
     existing_task = db.query(BackgroundTask).filter(
         BackgroundTask.fcs_file_id == (fcs_file.id if fcs_file else None),
