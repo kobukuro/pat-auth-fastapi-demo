@@ -29,6 +29,12 @@ def upgrade() -> None:
         "USING status::text::taskstatus"
     )
 
+    # 3. Restore server-side default for status
+    op.execute(
+        "ALTER TABLE background_tasks "
+        "ALTER COLUMN status SET DEFAULT 'pending'::taskstatus"
+    )
+
 
 def downgrade() -> None:
     """Downgrade schema: Revert status from ENUM to VARCHAR(20)."""
