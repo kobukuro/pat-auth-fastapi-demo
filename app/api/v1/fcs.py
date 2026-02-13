@@ -331,7 +331,6 @@ async def init_chunked_upload(
     ```
     """
     from datetime import datetime, timedelta
-    from app.models.background_task import BackgroundTask, TaskType
 
     # 1. Validate filename
     if not filename.lower().endswith(tuple(settings.ALLOWED_FCS_EXTENSIONS)):
@@ -465,8 +464,6 @@ async def upload_chunk(
       -F "chunk=@-"
     ```
     """
-    from app.models.background_task import BackgroundTask, TaskType
-
     # 1. Get upload session
     task = db.query(BackgroundTask).filter_by(id=task_id).first()
 
@@ -676,8 +673,6 @@ async def abort_chunked_upload(
       -F "task_id=123"
     ```
     """
-    from app.models.background_task import BackgroundTask, TaskType
-
     # 1. Get upload session
     task = db.query(BackgroundTask).filter_by(id=task_id).first()
 
@@ -903,8 +898,6 @@ async def trigger_statistics_calculation(
         HTTPException 403: If private file and user is not owner
         HTTPException 404: If file_id not found
     """
-    from app.models.background_task import BackgroundTask, TaskType
-
     # 1. Determine file source
     if request.file_id is None:
         # Sample file
@@ -1110,8 +1103,6 @@ async def get_task_status_endpoint(
         HTTPException 404: If task not found
         HTTPException 403: If user doesn't own the task or lacks required scope
     """
-    from app.models.background_task import BackgroundTask, TaskType
-
     pat, scopes = pat_data
 
     # 1. Get task first (need task_type to determine required scope)
