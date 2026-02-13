@@ -53,13 +53,13 @@ logger = setup_logging()
     status_code=status.HTTP_200_OK,
 )
 def get_fcs_parameters_endpoint(
-    file_id: str | None = Query(
-        None,
-        description="Optional file ID to query specific uploaded file. "
-        "If not provided, returns sample file parameters.",
-    ),
-    auth: AuthContext = Depends(require_scope("fcs:read")),
-    db: Session = Depends(get_db),
+        file_id: str | None = Query(
+            None,
+            description="Optional file ID to query specific uploaded file. "
+                        "If not provided, returns sample file parameters.",
+        ),
+        auth: AuthContext = Depends(require_scope("fcs:read")),
+        db: Session = Depends(get_db),
 ):
     """
     Get FCS file parameters.
@@ -172,24 +172,24 @@ def get_fcs_parameters_endpoint(
     status_code=status.HTTP_200_OK,
 )
 def get_fcs_events_endpoint(
-    file_id: str | None = Query(
-        None,
-        description="Optional file ID to query specific uploaded file. "
-        "If not provided, returns sample file events.",
-    ),
-    limit: int = Query(
-        100,
-        ge=1,
-        le=10000,
-        description="Maximum number of events to return (default: 100, max: 10000).",
-    ),
-    offset: int = Query(
-        0,
-        ge=0,
-        description="Number of events to skip from the beginning (default: 0).",
-    ),
-    auth: AuthContext = Depends(require_scope("fcs:read")),
-    db: Session = Depends(get_db),
+        file_id: str | None = Query(
+            None,
+            description="Optional file ID to query specific uploaded file. "
+                        "If not provided, returns sample file events.",
+        ),
+        limit: int = Query(
+            100,
+            ge=1,
+            le=10000,
+            description="Maximum number of events to return (default: 100, max: 10000).",
+        ),
+        offset: int = Query(
+            0,
+            ge=0,
+            description="Number of events to skip from the beginning (default: 0).",
+        ),
+        auth: AuthContext = Depends(require_scope("fcs:read")),
+        db: Session = Depends(get_db),
 ):
     """
     Get FCS file events with pagination.
@@ -290,15 +290,21 @@ def get_fcs_events_endpoint(
     status_code=status.HTTP_201_CREATED,
 )
 async def init_chunked_upload(
-    filename: str = Form(...),
-    file_size: int = Form(..., gt=0, le=settings.MAX_UPLOAD_SIZE_MB*1024*1024),  # Max settings.MAX_UPLOAD_SIZE_MB MiB (e.g. 1000 MiB ≈ 1.048 GB)
-    chunk_size: int = Form(settings.DEFAULT_CHUNK_SIZE_MB*1024*1024,
-                           ge=settings.MIN_CHUNK_SIZE_MB*1024*1024,
-                           le=settings.MAX_CHUNK_SIZE_MB*1024*1024),  # 1-10MB, default 5MB
-    is_public: bool = Form(True),
-    auth: AuthContext = Depends(require_scope("fcs:write")),
-    db: Session = Depends(get_db),
-    storage: StorageBackend = Depends(get_storage),
+        # FastAPI 會根據參數型別自動決定 Swagger UI 顯示的Content-Type
+        # 只有 Form() 參數，沒有 File() 或 UploadFile()
+        # → FastAPI 自動使用 application/x-www-form-urlencoded
+        # 在 FastAPI 裡面，... 代表 「必填欄位」, 所以這裡的 filename 是必填的
+        filename: str = Form(...),
+        # 在 FastAPI 裡面，... 代表 「必填欄位」, 所以這裡的 file_size 是必填的
+        file_size: int = Form(..., gt=0, le=settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024),
+        # Max settings.MAX_UPLOAD_SIZE_MB MiB (e.g. 1000 MiB ≈ 1.048 GB)
+        chunk_size: int = Form(settings.DEFAULT_CHUNK_SIZE_MB * 1024 * 1024,
+                               ge=settings.MIN_CHUNK_SIZE_MB * 1024 * 1024,
+                               le=settings.MAX_CHUNK_SIZE_MB * 1024 * 1024),  # 1-10MB, default 5MB
+        is_public: bool = Form(True),
+        auth: AuthContext = Depends(require_scope("fcs:write")),
+        db: Session = Depends(get_db),
+        storage: StorageBackend = Depends(get_storage),
 ):
     """
     Initialize chunked upload session for FCS file.
@@ -330,6 +336,7 @@ async def init_chunked_upload(
       -F "is_public=true"
     ```
     """
+
     from datetime import datetime, timedelta
 
     # 1. Validate filename
@@ -347,6 +354,12 @@ async def init_chunked_upload(
         )
 
     # 2. Calculate total chunks
+    """
+    為什麼不直接用 math.ceil()？
+    可以用 math.ceil(file_size / chunk_size)，但：
+    1. 需要先轉成浮點數除法 /，再轉回整數
+    2. 下面這個技巧只用整數運算，效能較好
+    """
     total_chunks = (file_size + chunk_size - 1) // chunk_size  # Ceiling division
 
     # 3. Create BackgroundTask for upload session
@@ -428,13 +441,13 @@ async def init_chunked_upload(
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def upload_chunk(
-    background_tasks: BackgroundTasks,
-    task_id: int = Form(...),
-    chunk_number: int = Form(..., ge=0),
-    chunk: UploadFile = File(...),
-    auth: AuthContext = Depends(require_scope("fcs:write")),
-    db: Session = Depends(get_db),
-    storage: StorageBackend = Depends(get_storage),
+        background_tasks: BackgroundTasks,
+        task_id: int = Form(...),
+        chunk_number: int = Form(..., ge=0),
+        chunk: UploadFile = File(...),
+        auth: AuthContext = Depends(require_scope("fcs:write")),
+        db: Session = Depends(get_db),
+        storage: StorageBackend = Depends(get_storage),
 ):
     """
     Upload a single chunk for a chunked upload session.
@@ -648,10 +661,10 @@ async def upload_chunk(
     status_code=status.HTTP_200_OK,
 )
 async def abort_chunked_upload(
-    task_id: int = Form(...),
-    auth: AuthContext = Depends(require_scope("fcs:write")),
-    db: Session = Depends(get_db),
-    storage: StorageBackend = Depends(get_storage),
+        task_id: int = Form(...),
+        auth: AuthContext = Depends(require_scope("fcs:write")),
+        db: Session = Depends(get_db),
+        storage: StorageBackend = Depends(get_storage),
 ):
     """
     Abort a chunked upload session and clean up resources.
@@ -738,11 +751,11 @@ async def abort_chunked_upload(
     status_code=status.HTTP_200_OK,
 )
 async def get_fcs_statistics_endpoint(
-    file_id: str | None = Query(
-        None, description="File ID or null for sample file"
-    ),
-    auth: AuthContext = Depends(require_scope("fcs:analyze")),
-    db: Session = Depends(get_db),
+        file_id: str | None = Query(
+            None, description="File ID or null for sample file"
+        ),
+        auth: AuthContext = Depends(require_scope("fcs:analyze")),
+        db: Session = Depends(get_db),
 ):
     """
     Get pre-calculated FCS file statistics from database.
@@ -823,7 +836,8 @@ async def get_fcs_statistics_endpoint(
     ).first()
 
     if in_progress_task:
-        logger.info(f"Statistics calculation in progress for file_id: {file_id_for_storage}, task_id: {in_progress_task.id}")
+        logger.info(
+            f"Statistics calculation in progress for file_id: {file_id_for_storage}, task_id: {in_progress_task.id}")
         return JSONResponse(
             status_code=status.HTTP_202_ACCEPTED,
             content={
@@ -867,10 +881,10 @@ async def get_fcs_statistics_endpoint(
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def trigger_statistics_calculation(
-    request: StatisticsCalculateRequest,
-    background_tasks: BackgroundTasks,
-    auth: AuthContext = Depends(require_scope("fcs:analyze")),
-    db: Session = Depends(get_db),
+        request: StatisticsCalculateRequest,
+        background_tasks: BackgroundTasks,
+        auth: AuthContext = Depends(require_scope("fcs:analyze")),
+        db: Session = Depends(get_db),
 ):
     """
     Trigger background statistics calculation.
@@ -1068,10 +1082,10 @@ def _is_task_public(db: Session, task: BackgroundTask) -> bool:
     status_code=status.HTTP_200_OK,
 )
 async def get_task_status_endpoint(
-    task_id: int,
-    request: Request,
-    pat_data: tuple[PersonalAccessToken, list[Scope]] = Depends(get_pat_with_scopes),
-    db: Session = Depends(get_db),
+        task_id: int,
+        request: Request,
+        pat_data: tuple[PersonalAccessToken, list[Scope]] = Depends(get_pat_with_scopes),
+        db: Session = Depends(get_db),
 ):
     """
     Get background task status and result.
@@ -1236,9 +1250,9 @@ async def get_task_status_endpoint(
     status_code=status.HTTP_200_OK,
 )
 async def download_fcs_file(
-    file_id: str,
-    auth: AuthContext = Depends(require_scope("fcs:read")),
-    db: Session = Depends(get_db),
+        file_id: str,
+        auth: AuthContext = Depends(require_scope("fcs:read")),
+        db: Session = Depends(get_db),
 ):
     """
     Download FCS file by short ID.
