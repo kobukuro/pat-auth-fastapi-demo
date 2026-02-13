@@ -71,10 +71,12 @@ def setup_database():
     """Run Alembic migrations at the start of the test session."""
     from alembic import command
     from alembic.config import Config
-    import os
+    from pathlib import Path
 
     # Configure Alembic to run migrations
-    alembic_cfg = Config(os.path.join(os.getcwd(), "alembic.ini"))
+    # Use __file__ to resolve path relative to this file, not working directory
+    repo_root = Path(__file__).parent.parent
+    alembic_cfg = Config(str(repo_root / "alembic.ini"))
 
     # Run all migrations to head
     # This ensures migrations are tested and matches production environment
