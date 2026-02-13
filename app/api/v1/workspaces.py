@@ -106,8 +106,8 @@ def delete_workspace(
     return APIResponse(
         success=True,
         data=WorkspacesStubResponseData(
-            endpoint=f"/api/v1/workspaces/{id}",
-            method="DELETE",
+            endpoint=auth.endpoint,
+            method=auth.method,
             required_scope=auth.required_scope,
             granted_by=auth.granted_by,
             your_scopes=[scope.name for scope in auth.scopes],
@@ -141,8 +141,8 @@ def update_workspace_settings(
     return APIResponse(
         success=True,
         data=WorkspacesStubResponseData(
-            endpoint=f"/api/v1/workspaces/{id}/settings",
-            method="PUT",
+            endpoint=auth.endpoint,
+            method=auth.method,
             required_scope=auth.required_scope,
             granted_by=auth.granted_by,
             your_scopes=[scope.name for scope in auth.scopes],
