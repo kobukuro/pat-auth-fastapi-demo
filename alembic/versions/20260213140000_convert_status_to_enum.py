@@ -22,14 +22,20 @@ def upgrade() -> None:
     # 1. Create ENUM type
     op.execute("CREATE TYPE taskstatus AS ENUM ('pending', 'processing', 'finalizing', 'completed', 'failed', 'expired')")
 
-    # 2. Alter column to use ENUM (PostgreSQL handles string conversion)
+    # 2. Drop the existing VARCHAR default before type conversion
+    op.execute(
+        "ALTER TABLE background_tasks "
+        "ALTER COLUMN status DROP DEFAULT"
+    )
+
+    # 3. Alter column to use ENUM (PostgreSQL handles string conversion)
     op.execute(
         "ALTER TABLE background_tasks "
         "ALTER COLUMN status TYPE taskstatus "
         "USING status::text::taskstatus"
     )
 
-    # 3. Restore server-side default for status
+    # 4. Restore server-side default for status with proper type cast
     op.execute(
         "ALTER TABLE background_tasks "
         "ALTER COLUMN status SET DEFAULT 'pending'::taskstatus"
