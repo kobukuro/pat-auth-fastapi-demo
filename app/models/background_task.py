@@ -59,11 +59,16 @@ class BackgroundTask(Base):
     __tablename__ = "background_tasks"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    task_type: Mapped[TaskType] = mapped_column(SQLEnum(TaskType))
+    task_type: Mapped[TaskType] = mapped_column(
+        SQLEnum(TaskType, values_callable=lambda obj: [e.value for e in obj])
+    )
     fcs_file_id: Mapped[int | None] = mapped_column(
         ForeignKey("fcs_files.id"), nullable=True
     )
-    status: Mapped[TaskStatus] = mapped_column(SQLEnum(TaskStatus), default=TaskStatus.PENDING)
+    status: Mapped[TaskStatus] = mapped_column(
+        SQLEnum(TaskStatus, values_callable=lambda obj: [e.value for e in obj]),
+        default=TaskStatus.PENDING
+    )
     # Status values defined in TaskStatus enum
     result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # For statistics: {total_events, statistics}

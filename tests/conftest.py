@@ -68,31 +68,29 @@ class TestStorageBackend(LocalStorageBackend):
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_database():
-    """Create all tables and seed scope data at the start of the test session."""
-    Base.metadata.create_all(bind=engine)
+    """Run Alembic migrations at the start of the test session."""
+    from alembic import command
+    from alembic.config import Config
+    import os
 
-    # Seed scope data (same data as in alembic migration)
-    db = SessionLocal()
-    try:
-        if db.query(Scope).count() == 0:
-            scopes = [
-                Scope(resource='workspaces', action='read', name='workspaces:read', level=1),
-                Scope(resource='workspaces', action='write', name='workspaces:write', level=2),
-                Scope(resource='workspaces', action='delete', name='workspaces:delete', level=3),
-                Scope(resource='workspaces', action='admin', name='workspaces:admin', level=4),
-                Scope(resource='users', action='read', name='users:read', level=1),
-                Scope(resource='users', action='write', name='users:write', level=2),
-                Scope(resource='fcs', action='read', name='fcs:read', level=1),
-                Scope(resource='fcs', action='write', name='fcs:write', level=2),
-                Scope(resource='fcs', action='analyze', name='fcs:analyze', level=3),
-            ]
-            db.add_all(scopes)
-            db.commit()
-    finally:
-        db.close()
+    # Configure Alembic to run migrations
+    alembic_cfg = Config(os.path.join(os.getcwd(), "alembic.ini"))
+
+    # Run all migrations to head
+    # This ensures migrations are tested and matches production environment
+    command.upgrade(alembic_cfg, "head")
 
     yield
-    Base.metadata.drop_all(bind=engine)
+
+    # Cleanup: drop all tables after ALL test sessions complete
+    # Note: Don't use Base.metadata.drop_all() as it may not properly handle
+    # migrations and can leave the database in an inconsistent state
+    # Instead, use alembic downgrade to base
+    try:
+        command.downgrade(alembic_cfg, "base")
+    except Exception:
+        # If downgrade fails, fall back to drop_all
+        Base.metadata.drop_all(bind=engine)
 
 
 @pytest.fixture
