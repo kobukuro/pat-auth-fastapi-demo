@@ -7,7 +7,10 @@ providing an S3-compatible abstraction layer.
 from abc import ABC, abstractmethod
 from typing import AsyncIterator
 
-
+# ABC是Abstract Base Class
+# - 是一個規格書、藍圖，定義了「子類別必須實作哪些方法」
+# - 不能直接實例化（不能直接 StorageBackend()來建立物件）
+# - 必須被子類別繼承，且子類別要實作所有抽象方法
 class StorageBackend(ABC):
     """
     Abstract base class for storage backends.
@@ -16,6 +19,10 @@ class StorageBackend(ABC):
     these methods to ensure compatibility and easy migration.
     """
 
+    """
+    標記這個方法是「抽象方法」
+      - 含義：子類別一定要實作這個方法，否則無法建立物件
+    """
     @abstractmethod
     async def save_file(
         self,
