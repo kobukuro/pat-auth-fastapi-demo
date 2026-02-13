@@ -291,8 +291,10 @@ def get_fcs_events_endpoint(
 )
 async def init_chunked_upload(
     filename: str = Form(...),
-    file_size: int = Form(..., gt=0, le=1000*1024*1024),  # Max 1GB
-    chunk_size: int = Form(5*1024*1024, ge=1*1024*1024, le=10*1024*1024),  # 1-10MB, default 5MB
+    file_size: int = Form(..., gt=0, le=settings.MAX_UPLOAD_SIZE_MB*1024*1024),  # Max settings.MAX_UPLOAD_SIZE_MB MiB (e.g. 1000 MiB ≈ 1.048 GB)
+    chunk_size: int = Form(settings.DEFAULT_CHUNK_SIZE_MB*1024*1024,
+                           ge=settings.MIN_CHUNK_SIZE_MB*1024*1024,
+                           le=settings.MAX_CHUNK_SIZE_MB*1024*1024),  # 1-10MB, default 5MB
     is_public: bool = Form(True),
     auth: AuthContext = Depends(require_scope("fcs:write")),
     db: Session = Depends(get_db),
