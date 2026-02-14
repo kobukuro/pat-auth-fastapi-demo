@@ -39,7 +39,9 @@ def upgrade() -> None:
     if count > 0:
         raise ValueError(
             f"Cannot remove 'finalizing' status: {count} task(s) still have this status. "
-            "Please update or remove these tasks before running this migration."
+            "Please update these tasks to 'completed', 'failed', or another valid status "
+            "(pending, processing, completed, failed, expired) before running this migration. "
+            "Example SQL: UPDATE background_tasks SET status = 'completed' WHERE status = 'finalizing';"
         )
 
     # Step 1: Drop the default (it depends on the ENUM type)
