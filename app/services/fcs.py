@@ -152,8 +152,6 @@ def get_fcs_file_path(file_id: str | None, db) -> tuple[str, object | None]:
     """
     Query database for FCS file by file_id and return file path.
 
-    This function is reserved for future use when file upload is implemented.
-
     Args:
         file_id: The file ID to query.
         db: Database session.
