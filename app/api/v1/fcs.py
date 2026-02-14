@@ -550,7 +550,7 @@ async def upload_chunk(
         file_size = task.extra_data.get("file_size", 0)
         remaining = file_size % chunk_size
         expected_size = remaining if remaining != 0 else chunk_size
-
+    # 如果用戶上傳的chunk大小不符，就會在這裡被攔截
     if len(chunk_data) != expected_size:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -601,6 +601,17 @@ async def upload_chunk(
         # Accumulate upload time (only count successful uploads)
         extra_data["accumulated_upload_ms"] = extra_data.get("accumulated_upload_ms", 0) + chunk_upload_time_ms
         task.extra_data = extra_data
+        """
+        明確告訴 SQLAlchemy ORM 說：extra_data這個欄位被修改過了，
+        需要在 db.commit() 時把更新寫入資料庫。
+        SQLAlchemy 的變更追蹤機制：
+            - SQLAlchemy 會自動追蹤物件的屬性變更
+            - 透過「值是否被重新賦值」來判斷是否需要 UPDATE
+        雖然在上面有重新賦值(task.extra_data = extra_data)，
+        但對於 JSON/JSONB 這種複雜型別，SQLAlchemy有時候會「沒有偵測到」內容的變化。
+        解決方案：
+        flag_modified() 就是強制標記這個欄位「已變更」，確保 commit 時會執行 UPDATE 語句。
+        """
         flag_modified(task, "extra_data")  # Explicitly mark JSON column as modified
         db.commit()
 
