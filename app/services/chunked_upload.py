@@ -28,6 +28,10 @@ async def finalize_chunked_upload(
     creates FCSFile record, and updates BackgroundTask status.
 
     This function is designed to be idempotent and safe to call multiple times.
+    idempotent:等冪性
+    意思:
+      - 不管你呼叫這個函數幾次，結果都是一樣的
+      - 不會因為「重複執行」就造成重複的副作用
 
     Args:
         task_id: Upload session identifier (task_id)
