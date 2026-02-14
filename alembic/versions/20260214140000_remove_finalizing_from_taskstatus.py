@@ -8,6 +8,7 @@ Create Date: 2026-02-14 14:00:00.000000
 from typing import Sequence, Union
 
 from alembic import op
+import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '20260214140000'
@@ -29,8 +30,17 @@ def upgrade() -> None:
     #   f. Restore default
 
     # Note: Since FINALIZING was never assigned in code, there should be 0 tasks in this state
-    # But we check anyway to be safe
-    op.execute("SELECT 1 FROM background_tasks WHERE status = 'finalizing' LIMIT 1")
+    # But we check anyway to be safe - fail migration if any 'finalizing' tasks exist
+    conn = op.get_bind()
+    result = conn.execute(
+        sa.text("SELECT COUNT(*) FROM background_tasks WHERE status = 'finalizing'")
+    )
+    count = result.scalar()
+    if count > 0:
+        raise ValueError(
+            f"Cannot remove 'finalizing' status: {count} task(s) still have this status. "
+            "Please update or remove these tasks before running this migration."
+        )
 
     # Step 1: Drop the default (it depends on the ENUM type)
     op.execute("""
