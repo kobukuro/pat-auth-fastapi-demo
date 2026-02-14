@@ -663,7 +663,7 @@ async def abort_chunked_upload(
 
     **Returns:**
     - task_id: Aborted session ID
-    - status: "aborted"
+    - status: "failed"
     - message: Confirmation message
 
     **Example:**
