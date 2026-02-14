@@ -313,8 +313,33 @@ class LocalStorageBackend(StorageBackend):
 
         try:
             # Write chunk at offset
+            """
+            aiofiles.open()：使用 aiofiles 函式庫以非同步方式開啟檔案（避免程式阻塞）
+            r (read)：讀取模式，檔案必須已存在（否則會報錯）
+            +：同時具備讀取和寫入權限（單純的 r 只能讀不能寫）
+            b (binary)：以位元組形式處理資料（適合上傳檔案等非文字資料）
+            async with：非同步上下文管理器，確保檔案正確關閉
+            as f：將檔案物件存入變數 f，後續可以用來操作檔案
+            
+            為什麼用 'r+b' 而不是 'wb'？
+                - 這個暫存檔案在 init_chunked_upload 階段就已經建立並預留空間了
+                - 我們需要讀取現有檔案（將來可能需要驗證內容）+ 在指定位置寫入新資料
+                - 'wb' 會清空檔案重新寫入，這不是我們要的
+            """
             async with aiofiles.open(temp_path, 'r+b') as f:
+                """
+                移動檔案游標（讀寫位置指標）到指定的位元組位置
+                await：等待這個非同步操作完成
+                """
                 await f.seek(offset)
+                """
+                將資料塊寫入檔案，並回傳實際寫入的位元組數
+                詳細說明：
+                    - chunk_data：要寫入的資料塊（bytes 型別）
+                    - 寫入操作會從目前游標位置開始（剛剛用 seek 設定的位置）
+                    - 回傳值 bytes_written：實際寫入的位元組數（通常等於len(chunk_data)）
+                    - await：等待這個非同步寫入操作完成
+                """
                 bytes_written = await f.write(chunk_data)
 
             return bytes_written
