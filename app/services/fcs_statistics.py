@@ -47,10 +47,28 @@ def calculate_fcs_statistics(file_path: str) -> FCSStatisticsResult:
     statistics = []
 
     for i, param_name in enumerate(pnn_labels):
+        """
+        events_array 是一個 NumPy 二維陣列
+        .shape[1]取得「第二個維度的大小」，也就是「欄位數量」
+        例如：如果陣列形狀是 (10000, 8)，表示有 10000筆事件、8個參數，那麼 shape[1] 就是8
+        
+        i >= events_array.shape[1]：
+            - 如果目前的索引 i 已經大於或等於欄位數量，表示「參數名稱清單比實際資料欄位還多」
+            - 這種情況可能發生在 FCS 檔案格式不一致時
+        break：
+        立即跳出迴圈，不再繼續處理後續的參數
+        這是一種「防禦性程式設計」，避免發生 IndexError
+        """
         if i >= events_array.shape[1]:
             break
 
         # Extract parameter column (vectorized)
+        """
+        這是NumPy 陣列切片（array slicing），用來提取某一欄的全部資料
+        :（冒號）：表示「所有列」
+        i：表示「第 i 個欄位」
+        整體意思：「取出第 i 欄的所有列」
+        """
         param_data = events_array[:, i]
 
         # Determine display type
