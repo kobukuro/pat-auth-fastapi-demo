@@ -1898,7 +1898,7 @@ def test_public_in_progress_upload_task_accessible_by_other_user(client):
         assert response.status_code == 200
         data = response.json()["data"]
         assert data["task_id"] == task_id
-        assert data["status"] in ["pending", "processing", "finalizing"]
+        assert data["status"] in ["pending", "processing"]
     else:
         # File is too small to test in-progress state, skip this scenario
         pass

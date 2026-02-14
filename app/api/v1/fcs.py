@@ -608,7 +608,7 @@ async def upload_chunk(
     # 7. Auto-trigger completion on last chunk
     is_last_chunk = (task.extra_data["uploaded_chunks"] == task.extra_data["total_chunks"])
 
-    if is_last_chunk and task.status not in [TaskStatus.FINALIZING, TaskStatus.COMPLETED]:
+    if is_last_chunk and task.status != TaskStatus.COMPLETED:
         # Trigger background completion task (don't set status here, let the background task handle it)
         from app.services.chunked_upload import finalize_chunked_upload
         background_tasks.add_task(
@@ -1193,13 +1193,6 @@ async def get_task_status_endpoint(
                 "uploaded_chunks": extra_data.get("uploaded_chunks", 0),
                 "total_chunks": extra_data.get("total_chunks", 0),
                 "progress_percentage": progress_percentage,
-            }
-
-        elif task.status == TaskStatus.FINALIZING:
-            # Parsing FCS file
-            response_data["result"] = {
-                "message": "Parsing FCS file...",
-                "filename": task.extra_data.get("filename", "") if task.extra_data else "",
             }
 
         elif task.status == TaskStatus.COMPLETED:

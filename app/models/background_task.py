@@ -30,7 +30,6 @@ class TaskStatus(str, Enum):
     """Background task status enumeration."""
     PENDING = "pending"
     PROCESSING = "processing"
-    FINALIZING = "finalizing"
     COMPLETED = "completed"
     FAILED = "failed"
     EXPIRED = "expired"
@@ -47,7 +46,7 @@ class BackgroundTask(Base):
         id: Primary key (used as task_id for API)
         task_type: Type of task (e.g., "statistics", "chunked_upload")
         fcs_file_id: Associated FCS file (nullable for sample files)
-        status: Task status (pending, processing, finalizing, completed, failed, expired)
+        status: Task status (pending, processing, completed, failed, expired)
         result: Task result data (JSON) - stores statistics or upload progress
         metadata: Additional task metadata (JSON) - stores upload session data
         created_at: Task creation timestamp
