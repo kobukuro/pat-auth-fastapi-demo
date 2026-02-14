@@ -251,6 +251,31 @@ def get_fcs_events(file_path: str, limit: int = 100, offset: int = 0) -> FCSEven
         )
 
     # Apply pagination using NumPy slicing
+    """
+    這行程式碼是在計算分頁切片的結束索引位置，確保不會超過陣列的實際大小，避免發生「索引超出範圍」的錯誤。
+    offset: 起始位置的偏移量（要跳過多少筆資料）
+    limit: 最多要回傳多少筆資料
+    total_events: FCS 檔案中事件（資料列）的總數
+    
+    情境 A：正常情況
+    total_events = 1000  # 檔案有 1000 筆事件
+    offset = 100         # 從第 100 筆開始
+    limit = 50           # 要取 50 筆
+    # offset + limit = 150
+    # min(150, 1000) = 150
+    # end_index = 150
+    這是正常狀況，結束位置是 150，會取到第 100~149 筆資料（共 50 筆）。
+
+    情境 B：超出範圍的請求
+    total_events = 1000  # 檔案只有 1000 筆事件
+    offset = 950         # 從第 950 筆開始
+    limit = 100          # 要求取 100 筆
+    # offset + limit = 1050（超過總數！）
+    # min(1050, 1000) = 1000
+    # end_index = 1000
+    如果直接用 offset + limit（1050）去切陣列，會導致IndexError，因為陣列最大索引只有 999。
+    用 min() 函數可以自動限制在總數範圍內，只取到第 950~999 筆資料（共 50 筆）。
+    """
     end_index = min(offset + limit, total_events)
     paginated_events = events_array[offset:end_index]
 
