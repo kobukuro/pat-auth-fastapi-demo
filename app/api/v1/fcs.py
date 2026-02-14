@@ -663,7 +663,7 @@ async def abort_chunked_upload(
 
     **Returns:**
     - task_id: Aborted session ID
-    - status: "aborted"
+    - status: "failed"
     - message: Confirmation message
 
     **Example:**
@@ -715,7 +715,7 @@ async def abort_chunked_upload(
         logger.error(f"Failed to cleanup upload session {task_id}: {str(e)}", exc_info=True)
 
     # 5. Update session
-    task.status = "failed"
+    task.status = TaskStatus.FAILED
     task.result = {"error_message": "Upload aborted by user"}
     db.commit()
 
@@ -726,7 +726,7 @@ async def abort_chunked_upload(
         success=True,
         data={
             "task_id": task_id,
-            "status": "failed",
+            "status": task.status,
             "message": "Upload session aborted successfully",
         },
     )
