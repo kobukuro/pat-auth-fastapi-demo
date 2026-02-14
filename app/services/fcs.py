@@ -6,10 +6,8 @@ using the flowio library. It extracts parameters metadata from FCS files.
 """
 import os
 from dataclasses import dataclass
-from pathlib import Path
 
 from flowio import FlowData
-
 
 # Configuration
 SAMPLE_FCS_PATH = "app/data/sample.fcs"
