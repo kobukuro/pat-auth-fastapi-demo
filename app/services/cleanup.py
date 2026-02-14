@@ -49,10 +49,10 @@ async def cleanup_expired_upload_sessions(
         storage = get_storage()
 
     try:
-        # Find expired pending/uploading/finalizing sessions
+        # Find expired pending/uploading sessions
         expired_sessions = db.query(BackgroundTask).filter(
             BackgroundTask.task_type == TaskType.CHUNKED_UPLOAD,
-            BackgroundTask.status.in_([TaskStatus.PENDING, TaskStatus.PROCESSING, TaskStatus.FINALIZING, TaskStatus.FAILED]),
+            BackgroundTask.status.in_([TaskStatus.PENDING, TaskStatus.PROCESSING, TaskStatus.FAILED]),
             BackgroundTask.expires_at < datetime.now(),
         ).all()
 
@@ -119,7 +119,7 @@ async def cleanup_orphaned_temp_files(
             for row in db.query(BackgroundTask)
             .filter(
                 BackgroundTask.task_type == TaskType.CHUNKED_UPLOAD,
-                BackgroundTask.status.in_([TaskStatus.PENDING, TaskStatus.PROCESSING, TaskStatus.FINALIZING]),
+                BackgroundTask.status.in_([TaskStatus.PENDING, TaskStatus.PROCESSING]),
             )
             .all()
         )

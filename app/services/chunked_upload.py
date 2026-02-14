@@ -62,12 +62,6 @@ async def finalize_chunked_upload(
                     "total_parameters": task.fcs_file.total_parameters or 0,
                 }
 
-        # Idempotency: Check if already finalizing
-        if task.status == TaskStatus.FINALIZING:
-            logger.info(f"Task {task_id} is already finalizing")
-            # Wait or return error (simplified: return error)
-            raise ValueError("Upload is finalizing, please wait")
-
         # 2. Validate all chunks uploaded
         extra_data = task.extra_data or {}
         uploaded_chunks = extra_data.get("uploaded_chunks", 0)
