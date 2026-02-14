@@ -83,6 +83,10 @@ async def calculate_statistics_task(
 
     except Exception as e:
         # Mark task as failed
+        """
+        這是一個變數存在性檢查，用來判斷 task 這個變數是否已經被定義。
+        locals() 是 Python 的內建函式，它會回傳一個字典，包含目前區域範圍內所有變數的名稱和值
+        """
         if "task" in locals():
             task.status = TaskStatus.FAILED
             task.result = {"error": str(e)}
