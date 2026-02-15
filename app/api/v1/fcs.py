@@ -1013,7 +1013,7 @@ async def trigger_statistics_calculation(
     )
 
 
-def _is_task_public(db: Session, task: BackgroundTask) -> bool:
+def _is_task_public(task: BackgroundTask) -> bool:
     """
     Determine if a task is publicly accessible.
 
@@ -1024,7 +1024,6 @@ def _is_task_public(db: Session, task: BackgroundTask) -> bool:
                 OR fcs_file.is_public is True
 
     Args:
-        db: Database session
         task: BackgroundTask to check
 
     Returns:
@@ -1069,7 +1068,6 @@ def _is_task_public(db: Session, task: BackgroundTask) -> bool:
 )
 async def get_task_status_endpoint(
     task_id: int,
-    request: Request,
     pat_data: tuple[PersonalAccessToken, list[Scope]] = Depends(get_pat_with_scopes),
     db: Session = Depends(get_db),
 ):
@@ -1085,7 +1083,6 @@ async def get_task_status_endpoint(
 
     Args:
         task_id: Task ID (auto-increment integer)
-        request: FastAPI Request object (for dynamic endpoint/method detection)
         pat_data: Tuple of (PAT, scopes) from authentication
         db: Database session
 
@@ -1133,15 +1130,12 @@ async def get_task_status_endpoint(
     # 3. Check if user has the required scope for this task type
     check_permission_and_get_context(
         db=db,
-        pat=pat,
         scopes=scopes,
         required_scope=required_scope,
-        endpoint=request.url.path,
-        method=request.method,
     )
 
     # 4. Access control: public tasks visible to all, private tasks only to owner
-    is_task_public = _is_task_public(db, task)
+    is_task_public = _is_task_public(task)
 
     if not is_task_public:
         # Private task - only owner can view

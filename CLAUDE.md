@@ -162,37 +162,36 @@ if has_permission(db, user_scopes, "workspaces:delete"):
 ```
 
 **Dynamic permission checking (based on resource attributes):**
+
 ```python
 from app.dependencies.pat import get_pat_with_scopes
 from app.utils.authorization import check_permission_and_get_context
 
+
 @router.get("/api/v1/resources/{resource_id}")
 async def get_resource(
-    resource_id: int,
-    pat_data: tuple[PersonalAccessToken, list[Scope]] = Depends(get_pat_with_scopes),
-    db: Session = Depends(get_db),
+        resource_id: int,
+        pat_data: tuple[PersonalAccessToken, list[Scope]] = Depends(get_pat_with_scopes),
+        db: Session = Depends(get_db),
 ):
-    pat, scopes = pat_data
+   pat, scopes = pat_data
 
-    # Fetch resource first
-    resource = db.query(Resource).get(resource_id)
-    if not resource:
-        raise HTTPException(404, "Resource not found")
+   # Fetch resource first
+   resource = db.query(Resource).get(resource_id)
+   if not resource:
+      raise HTTPException(404, "Resource not found")
 
-    # Determine required scope based on resource attributes
-    required_scope = "resource:write" if resource.is_sensitive else "resource:read"
+   # Determine required scope based on resource attributes
+   required_scope = "resource:write" if resource.is_sensitive else "resource:read"
 
-    # Check permission manually
-    check_permission_and_get_context(
-        db=db,
-        pat=pat,
-        scopes=scopes,
-        required_scope=required_scope,
-        endpoint=f"/api/v1/resources/{resource_id}",
-        method="GET",
-    )
+   # Check permission manually
+   check_permission_and_get_context(
+      db=db,
+      scopes=scopes,
+      required_scope=required_scope,
+   )
 
-    # Continue with business logic...
+   # Continue with business logic...
 ```
 
 **When to use dynamic permission checking:**
