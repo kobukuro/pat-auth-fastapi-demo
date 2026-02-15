@@ -30,9 +30,10 @@ async def periodic_cleanup(interval_seconds: int = 3600):
     from app.database import SessionLocal
     from app.dependencies.storage import get_storage
 
-    logger.info(f"Starting periodic cleanup task (interval: {interval_seconds}s")
+    logger.info(f"Starting periodic cleanup task (interval: {interval_seconds}s)")
 
     while True:
+        db = None
         try:
             # Create fresh database session for each cleanup run
             db = SessionLocal()
@@ -51,7 +52,8 @@ async def periodic_cleanup(interval_seconds: int = 3600):
 
             finally:
                 # Always close the database session
-                db.close()
+                if db is not None:
+                    db.close()
 
         except Exception as e:
             logger.error(f"Periodic cleanup failed: {e}", exc_info=True)
