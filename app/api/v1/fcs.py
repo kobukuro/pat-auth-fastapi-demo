@@ -1092,7 +1092,7 @@ async def get_task_status_endpoint(
     Returns:
         APIResponse with TaskResponseData containing:
         - task_id: Task ID
-        - status: Current status (pending, processing, finalizing, completed, failed)
+        - status: Current status (pending, processing, completed, failed)
         - created_at: Creation timestamp
         - completed_at: Completion timestamp (if completed/failed)
         - result: Task result based on task_type:

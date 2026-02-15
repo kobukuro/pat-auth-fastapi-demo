@@ -208,7 +208,7 @@ class TaskResponseData(BaseModel):
     """Task type (statistics or chunked_upload)."""
 
     status: str
-    """Task status (pending, processing, finalizing, completed, failed, expired)."""
+    """Task status (pending, processing, completed, failed, expired)."""
 
     created_at: str
     """Task creation timestamp (ISO format)."""
