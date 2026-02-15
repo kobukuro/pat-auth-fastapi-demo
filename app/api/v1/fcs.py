@@ -837,9 +837,9 @@ async def get_fcs_statistics_endpoint(
         )
 
     # 4. Read from database
-    cached = db.query(FCSStatistics).filter_by(file_id=file_id_for_storage).first()
+    stored_stats = db.query(FCSStatistics).filter_by(file_id=file_id_for_storage).first()
 
-    if not cached:
+    if not stored_stats:
         logger.info(f"Statistics not found for file_id: {file_id_for_storage}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -855,8 +855,8 @@ async def get_fcs_statistics_endpoint(
     return APIResponse(
         success=True,
         data={
-            "total_events": cached.total_events,
-            "statistics": cached.statistics,
+            "total_events": stored_stats.total_events,
+            "statistics": stored_stats.statistics,
         },
     )
 
@@ -935,9 +935,9 @@ async def trigger_statistics_calculation(
             )
 
     # 3. Check database (already calculated?)
-    cached = db.query(FCSStatistics).filter_by(file_id=file_id_for_storage).first()
+    stored_stats = db.query(FCSStatistics).filter_by(file_id=file_id_for_storage).first()
 
-    if cached:
+    if stored_stats:
         logger.info(f"Statistics already calculated for file_id: {file_id_for_storage}")
         return APIResponse(
             success=True,
@@ -946,8 +946,8 @@ async def trigger_statistics_calculation(
                 "status": TaskStatus.COMPLETED,
                 "message": "Statistics already calculated",
                 "result": {
-                    "total_events": cached.total_events,
-                    "statistics": cached.statistics,
+                    "total_events": stored_stats.total_events,
+                    "statistics": stored_stats.statistics,
                 },
             },
         )
