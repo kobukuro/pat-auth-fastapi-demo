@@ -25,7 +25,7 @@ async def calculate_statistics_task(
     Background task for FCS statistics calculation.
 
     This function runs asynchronously after the API response is sent.
-    It calculates statistics for an FCS file and caches the results in the database.
+    It calculates statistics for an FCS file and stores the results in the database.
 
     Args:
         task_id: Background task ID (auto-increment integer)
@@ -58,7 +58,7 @@ async def calculate_statistics_task(
         # Calculate statistics using NumPy
         result = calculate_fcs_statistics(file_path)
 
-        # Cache results in database (both sample and uploaded files)
+        # Store results in database (both sample and uploaded files)
         stats_record = FCSStatistics(
             file_id=file_id_for_storage,
             fcs_file_id=fcs_file_id,

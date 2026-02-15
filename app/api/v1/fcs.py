@@ -745,9 +745,9 @@ async def get_fcs_statistics_endpoint(
     db: Session = Depends(get_db),
 ):
     """
-    Get FCS file statistics from cache.
+    Get pre-calculated FCS file statistics from database.
 
-    Returns cached statistics if available. If a calculation is in progress,
+    Returns stored statistics if available. If a calculation is in progress,
     returns 202 with task information. If statistics haven't been calculated
     and no task is in progress, returns 404 with a message to call
     POST /statistics/calculate first.
@@ -836,10 +836,10 @@ async def get_fcs_statistics_endpoint(
             },
         )
 
-    # 4. Read from cache
-    cached = db.query(FCSStatistics).filter_by(file_id=file_id_for_storage).first()
+    # 4. Read from database
+    stored_stats = db.query(FCSStatistics).filter_by(file_id=file_id_for_storage).first()
 
-    if not cached:
+    if not stored_stats:
         logger.info(f"Statistics not found for file_id: {file_id_for_storage}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -850,13 +850,13 @@ async def get_fcs_statistics_endpoint(
             },
         )
 
-    # 5. Return cached result
-    logger.info(f"Returning cached statistics for file_id: {file_id_for_storage}")
+    # 5. Return stored result
+    logger.info(f"Returning stored statistics for file_id: {file_id_for_storage}")
     return APIResponse(
         success=True,
         data={
-            "total_events": cached.total_events,
-            "statistics": cached.statistics,
+            "total_events": stored_stats.total_events,
+            "statistics": stored_stats.statistics,
         },
     )
 
@@ -892,7 +892,7 @@ async def trigger_statistics_calculation(
         background_tasks: FastAPI BackgroundTasks for async execution
 
     Returns:
-        APIResponse with task_id and status, or cached results if already calculated
+        APIResponse with task_id and status, or stored results if already calculated
 
     Raises:
         HTTPException 403: If private file and user is not owner
@@ -934,10 +934,10 @@ async def trigger_statistics_calculation(
                 },
             )
 
-    # 3. Check cache (already calculated?)
-    cached = db.query(FCSStatistics).filter_by(file_id=file_id_for_storage).first()
+    # 3. Check database (already calculated?)
+    stored_stats = db.query(FCSStatistics).filter_by(file_id=file_id_for_storage).first()
 
-    if cached:
+    if stored_stats:
         logger.info(f"Statistics already calculated for file_id: {file_id_for_storage}")
         return APIResponse(
             success=True,
@@ -946,8 +946,8 @@ async def trigger_statistics_calculation(
                 "status": TaskStatus.COMPLETED,
                 "message": "Statistics already calculated",
                 "result": {
-                    "total_events": cached.total_events,
-                    "statistics": cached.statistics,
+                    "total_events": stored_stats.total_events,
+                    "statistics": stored_stats.statistics,
                 },
             },
         )

@@ -26,8 +26,8 @@ class FCSFile(Base):
         filename: Original filename
         file_path: Storage path
         file_size: File size in bytes
-        total_events: Total number of events (cached after parsing)
-        total_parameters: Total number of parameters (cached after parsing)
+        total_events: Total number of events (stored after parsing)
+        total_parameters: Total number of parameters (stored after parsing)
         is_public: Whether the file is publicly accessible
         upload_duration_ms: Upload duration in milliseconds (US-MVP-001 requirement)
         uploaded_at: Upload timestamp
