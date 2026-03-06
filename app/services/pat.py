@@ -48,6 +48,9 @@ def has_permission(db: Session, granted_scopes: list[Scope], required_scope: str
 
     Higher level includes lower level within same resource.
     Does NOT inherit across different resources.
+
+    This function uses short-circuit logic: returns True as soon as
+    it finds ANY matching scope, without determining which is "best".
     """
     required = db.execute(select(Scope).where(Scope.name == required_scope)).scalar_one_or_none()
     if not required:
@@ -58,6 +61,49 @@ def has_permission(db: Session, granted_scopes: list[Scope], required_scope: str
             return True
 
     return False
+
+
+def has_permission_with_granting_scope(
+    db: Session, granted_scopes: list[Scope], required_scope: str
+) -> tuple[bool, str | None]:
+    """
+    Check permission and return (has_permission, granting_scope_name).
+
+    This is an optimized version of has_permission() that also returns
+    which scope granted access, avoiding duplicate database queries.
+
+    Args:
+        db: Database session
+        granted_scopes: List of Scope objects the user has
+        required_scope: The scope being checked (e.g., "workspaces:read")
+
+    Returns:
+        tuple of (has_permission, granting_scope_name):
+        - (True, scope_name) if permission granted
+        - (False, None) if permission denied
+    """
+    required = db.execute(select(Scope).where(Scope.name == required_scope)).scalar_one_or_none()
+    if not required:
+        return False, None
+
+    # Find the best granting scope (same resource, highest level >= required level)
+    best_level: int | None = None
+    best_name: str | None = None
+    for granted in granted_scopes:
+        if granted.resource == required.resource and granted.level >= required.level:
+            if (
+                best_level is None
+                or granted.level > best_level
+                or (granted.level == best_level and (best_name is None or granted.name > best_name))
+            ):
+                best_level = granted.level
+                best_name = granted.name
+
+    # Return highest level granting scope (matching previous tuple-sort behavior)
+    if best_name is not None:
+        return True, best_name
+
+    return False, None
 
 
 def get_pat_by_token(db: Session, token: str) -> PersonalAccessToken | None:

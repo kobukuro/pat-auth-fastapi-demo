@@ -1,13 +1,13 @@
-import hashlib
 from datetime import datetime, timezone
 
 from fastapi import Request
-from sqlalchemy import select
 
 from app.database import SessionLocal
+from app.logging_config import setup_logging
 from app.models.audit_log import PersonalAccessTokenAuditLog
-from app.models.pat import PersonalAccessToken
 from app.utils.datetime import ensure_aware
+
+logger = setup_logging()
 
 
 async def audit_pat_middleware(request: Request, call_next):
@@ -45,7 +45,7 @@ async def audit_pat_middleware(request: Request, call_next):
 
     # After request completes, log if it was a PAT
     if is_pat:
-        # Use separate DB session to avoid interfering with the request
+        # Create a new DB session for audit logging since any request-scoped session created by dependencies has already been cleaned up (closed) by this point
         db = SessionLocal()
 
         try:
@@ -98,8 +98,7 @@ async def audit_pat_middleware(request: Request, call_next):
         except Exception as e:
             # Non-blocking: don't let logging failures break the request
             db.rollback()
-            # In production, you'd want to log this error somewhere
-            print(f"Audit logging failed: {e}")
+            logger.error(f"Audit logging failed: {e}", exc_info=True)
         finally:
             db.close()
 

@@ -30,29 +30,10 @@ def db_with_cleanup():
 
     This allows the audit middleware's separate session to see the data
     and persist audit logs that we can verify.
+
+    Note: Tables are created by the session-level setup_database fixture
+    which uses Alembic migrations. This fixture just creates a new session.
     """
-    # Ensure tables exist
-    Base.metadata.create_all(bind=engine)
-
-    # Seed scopes if needed
-    db = SessionLocal()
-    try:
-        if db.query(Scope).count() == 0:
-            scopes = [
-                Scope(resource='workspaces', action='read', name='workspaces:read', level=1),
-                Scope(resource='workspaces', action='write', name='workspaces:write', level=2),
-                Scope(resource='workspaces', action='delete', name='workspaces:delete', level=3),
-                Scope(resource='workspaces', action='admin', name='workspaces:admin', level=4),
-                # FCS scopes for file download testing
-                Scope(resource='fcs', action='read', name='fcs:read', level=1),
-                Scope(resource='fcs', action='write', name='fcs:write', level=2),
-                Scope(resource='fcs', action='analyze', name='fcs:analyze', level=3),
-            ]
-            db.add_all(scopes)
-            db.commit()
-    finally:
-        db.close()
-
     # Create a new session for the test
     db = SessionLocal()
 

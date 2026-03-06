@@ -5,31 +5,27 @@ This module provides API endpoints for FCS (Flow Cytometry Standard) file operat
 including parameter retrieval, events query, file upload, and statistics calculation.
 """
 import time
-
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse
-
-from sqlalchemy.orm import Session
 from sqlalchemy import or_
+from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import SessionLocal, get_db
 from app.dependencies.pat import AuthContext, get_pat_with_scopes, require_scope
 from app.dependencies.storage import get_storage
 from app.logging_config import setup_logging
-from app.models.background_task import BackgroundTask
-from app.models.fcs_file import FCSFile
+from app.models.background_task import BackgroundTask, TaskType, TaskStatus
+from app.models.fcs_statistics import FCSStatistics
 from app.models.pat import PersonalAccessToken
 from app.models.scope import Scope
-from app.models.fcs_statistics import FCSStatistics
 from app.schemas.common import APIResponse
 from app.schemas.fcs import (
     ChunkedUploadChunkResponse,
     ChunkedUploadInitResponse,
     FCSEventsResponseData,
-    FCSFileResponse,
     FCSParametersResponseData,
     FCSStatisticsResponseData,
     StatisticsCalculateRequest,
@@ -44,7 +40,6 @@ from app.services.fcs import (
 )
 from app.storage.base import StorageBackend
 from app.utils.authorization import check_permission_and_get_context
-from app.utils.ids import generate_short_id
 
 router = APIRouter(prefix="/fcs", tags=["fcs"])
 
@@ -122,7 +117,6 @@ def get_fcs_parameters_endpoint(
         if fcs_file and not fcs_file.is_public:
             # Get user_id from the PAT
             # The PAT is associated with a user through the tokens
-            from sqlalchemy import select
 
             # Check if the authenticated token belongs to the file owner
             pat_user_id = None
@@ -250,7 +244,6 @@ def get_fcs_events_endpoint(
 
         # Permission check for private files
         if fcs_file and not fcs_file.is_public:
-            from sqlalchemy import select
 
             pat_user_id = auth.pat.user_id if auth.pat else None
             if fcs_file.user_id != pat_user_id:
@@ -298,8 +291,10 @@ def get_fcs_events_endpoint(
 )
 async def init_chunked_upload(
     filename: str = Form(...),
-    file_size: int = Form(..., gt=0, le=1000*1024*1024),  # Max 1GB
-    chunk_size: int = Form(5*1024*1024, ge=1*1024*1024, le=10*1024*1024),  # 1-10MB, default 5MB
+    file_size: int = Form(..., gt=0, le=settings.MAX_UPLOAD_SIZE_MB*1024*1024),  # Max settings.MAX_UPLOAD_SIZE_MB MiB (e.g. 1000 MiB ≈ 1.048 GB)
+    chunk_size: int = Form(settings.DEFAULT_CHUNK_SIZE_MB*1024*1024,
+                           ge=settings.MIN_CHUNK_SIZE_MB*1024*1024,
+                           le=settings.MAX_CHUNK_SIZE_MB*1024*1024),  # 1-10MB, default 5MB
     is_public: bool = Form(True),
     auth: AuthContext = Depends(require_scope("fcs:write")),
     db: Session = Depends(get_db),
@@ -336,7 +331,6 @@ async def init_chunked_upload(
     ```
     """
     from datetime import datetime, timedelta
-    from app.models.background_task import BackgroundTask
 
     # 1. Validate filename
     if not filename.lower().endswith(tuple(settings.ALLOWED_FCS_EXTENSIONS)):
@@ -357,8 +351,8 @@ async def init_chunked_upload(
 
     # 3. Create BackgroundTask for upload session
     task = BackgroundTask(
-        task_type="chunked_upload",
-        status="pending",
+        task_type=TaskType.CHUNKED_UPLOAD,
+        status=TaskStatus.PENDING,
         user_id=auth.pat.user_id,
         expires_at=datetime.now() + timedelta(hours=24),
         extra_data={
@@ -389,12 +383,12 @@ async def init_chunked_upload(
 
         # Update task with temp path and status
         task.extra_data["temp_file_path"] = temp_path
-        task.status = "processing"
+        task.status = TaskStatus.PROCESSING
         db.commit()
 
     except Exception as e:
         logger.error(f"Failed to init chunked upload: {str(e)}", exc_info=True)
-        task.status = "failed"
+        task.status = TaskStatus.FAILED
         task.result = {"error_message": "Failed to initialize upload"}
         db.commit()
         raise HTTPException(
@@ -422,7 +416,7 @@ async def init_chunked_upload(
             "file_size": file_size,
             "chunk_size": chunk_size,
             "total_chunks": total_chunks,
-            "status": "processing",
+            "status": TaskStatus.PROCESSING,
             "expires_at": task.expires_at.isoformat() if task.expires_at else None,
         },
     )
@@ -470,8 +464,6 @@ async def upload_chunk(
       -F "chunk=@-"
     ```
     """
-    from app.models.background_task import BackgroundTask
-
     # 1. Get upload session
     task = db.query(BackgroundTask).filter_by(id=task_id).first()
 
@@ -486,7 +478,7 @@ async def upload_chunk(
         )
 
     # 1.5. Validate task type
-    if task.task_type != "chunked_upload":
+    if task.task_type != TaskType.CHUNKED_UPLOAD:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
@@ -508,7 +500,7 @@ async def upload_chunk(
         )
 
     # 3. Validate session status
-    if task.status not in ["pending", "processing"]:
+    if task.status not in [TaskStatus.PENDING, TaskStatus.PROCESSING]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
@@ -601,7 +593,7 @@ async def upload_chunk(
 
     except Exception as e:
         logger.error(f"Failed to save chunk {chunk_number}: {str(e)}", exc_info=True)
-        task.status = "failed"
+        task.status = TaskStatus.FAILED
         task.result = {"error_message": "Failed to save chunk"}
         db.commit()
         raise HTTPException(
@@ -616,7 +608,7 @@ async def upload_chunk(
     # 7. Auto-trigger completion on last chunk
     is_last_chunk = (task.extra_data["uploaded_chunks"] == task.extra_data["total_chunks"])
 
-    if is_last_chunk and task.status not in ["finalizing", "completed"]:
+    if is_last_chunk and task.status != TaskStatus.COMPLETED:
         # Trigger background completion task (don't set status here, let the background task handle it)
         from app.services.chunked_upload import finalize_chunked_upload
         background_tasks.add_task(
@@ -671,7 +663,7 @@ async def abort_chunked_upload(
 
     **Returns:**
     - task_id: Aborted session ID
-    - status: "aborted"
+    - status: "failed"
     - message: Confirmation message
 
     **Example:**
@@ -681,8 +673,6 @@ async def abort_chunked_upload(
       -F "task_id=123"
     ```
     """
-    from app.models.background_task import BackgroundTask
-
     # 1. Get upload session
     task = db.query(BackgroundTask).filter_by(id=task_id).first()
 
@@ -708,7 +698,7 @@ async def abort_chunked_upload(
         )
 
     # 3. Cannot abort completed sessions
-    if task.status == "completed":
+    if task.status == TaskStatus.COMPLETED:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
@@ -725,7 +715,7 @@ async def abort_chunked_upload(
         logger.error(f"Failed to cleanup upload session {task_id}: {str(e)}", exc_info=True)
 
     # 5. Update session
-    task.status = "failed"
+    task.status = TaskStatus.FAILED
     task.result = {"error_message": "Upload aborted by user"}
     db.commit()
 
@@ -736,7 +726,7 @@ async def abort_chunked_upload(
         success=True,
         data={
             "task_id": task_id,
-            "status": "failed",
+            "status": task.status,
             "message": "Upload session aborted successfully",
         },
     )
@@ -755,9 +745,9 @@ async def get_fcs_statistics_endpoint(
     db: Session = Depends(get_db),
 ):
     """
-    Get FCS file statistics from cache.
+    Get pre-calculated FCS file statistics from database.
 
-    Returns cached statistics if available. If a calculation is in progress,
+    Returns stored statistics if available. If a calculation is in progress,
     returns 202 with task information. If statistics haven't been calculated
     and no task is in progress, returns 404 with a message to call
     POST /statistics/calculate first.
@@ -825,10 +815,10 @@ async def get_fcs_statistics_endpoint(
 
     in_progress_task = db.query(BackgroundTask).filter(
         BackgroundTask.fcs_file_id == fcs_file_id_for_task,
-        BackgroundTask.task_type == "statistics",
+        BackgroundTask.task_type == TaskType.STATISTICS,
         or_(
-            BackgroundTask.status == "pending",
-            BackgroundTask.status == "processing",
+            BackgroundTask.status == TaskStatus.PENDING,
+            BackgroundTask.status == TaskStatus.PROCESSING,
         ),
     ).first()
 
@@ -846,10 +836,10 @@ async def get_fcs_statistics_endpoint(
             },
         )
 
-    # 4. Read from cache
-    cached = db.query(FCSStatistics).filter_by(file_id=file_id_for_storage).first()
+    # 4. Read from database
+    stored_stats = db.query(FCSStatistics).filter_by(file_id=file_id_for_storage).first()
 
-    if not cached:
+    if not stored_stats:
         logger.info(f"Statistics not found for file_id: {file_id_for_storage}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -860,13 +850,13 @@ async def get_fcs_statistics_endpoint(
             },
         )
 
-    # 5. Return cached result
-    logger.info(f"Returning cached statistics for file_id: {file_id_for_storage}")
+    # 5. Return stored result
+    logger.info(f"Returning stored statistics for file_id: {file_id_for_storage}")
     return APIResponse(
         success=True,
         data={
-            "total_events": cached.total_events,
-            "statistics": cached.statistics,
+            "total_events": stored_stats.total_events,
+            "statistics": stored_stats.statistics,
         },
     )
 
@@ -902,14 +892,12 @@ async def trigger_statistics_calculation(
         background_tasks: FastAPI BackgroundTasks for async execution
 
     Returns:
-        APIResponse with task_id and status, or cached results if already calculated
+        APIResponse with task_id and status, or stored results if already calculated
 
     Raises:
         HTTPException 403: If private file and user is not owner
         HTTPException 404: If file_id not found
     """
-    from app.models.background_task import BackgroundTask
-
     # 1. Determine file source
     if request.file_id is None:
         # Sample file
@@ -946,33 +934,31 @@ async def trigger_statistics_calculation(
                 },
             )
 
-    # 3. Check cache (already calculated?)
-    cached = db.query(FCSStatistics).filter_by(file_id=file_id_for_storage).first()
+    # 3. Check database (already calculated?)
+    stored_stats = db.query(FCSStatistics).filter_by(file_id=file_id_for_storage).first()
 
-    if cached:
+    if stored_stats:
         logger.info(f"Statistics already calculated for file_id: {file_id_for_storage}")
         return APIResponse(
             success=True,
             data={
                 "task_id": None,
-                "status": "completed",
+                "status": TaskStatus.COMPLETED,
                 "message": "Statistics already calculated",
                 "result": {
-                    "total_events": cached.total_events,
-                    "statistics": cached.statistics,
+                    "total_events": stored_stats.total_events,
+                    "statistics": stored_stats.statistics,
                 },
             },
         )
 
     # 4. Check for existing in-progress task
-    from sqlalchemy import select, or_
-
     existing_task = db.query(BackgroundTask).filter(
         BackgroundTask.fcs_file_id == (fcs_file.id if fcs_file else None),
-        BackgroundTask.task_type == "statistics",
+        BackgroundTask.task_type == TaskType.STATISTICS,
         or_(
-            BackgroundTask.status == "pending",
-            BackgroundTask.status == "processing",
+            BackgroundTask.status == TaskStatus.PENDING,
+            BackgroundTask.status == TaskStatus.PROCESSING,
         ),
     ).first()
 
@@ -989,9 +975,9 @@ async def trigger_statistics_calculation(
 
     # 5. Create background task (using auto-increment id as task_id)
     task = BackgroundTask(
-        task_type="statistics",
+        task_type=TaskType.STATISTICS,
         fcs_file_id=fcs_file.id if fcs_file else None,
-        status="pending",
+        status=TaskStatus.PENDING,
         user_id=auth.pat.user_id,
     )
     db.add(task)
@@ -1027,7 +1013,7 @@ async def trigger_statistics_calculation(
     )
 
 
-def _is_task_public(db: Session, task: BackgroundTask) -> bool:
+def _is_task_public(task: BackgroundTask) -> bool:
     """
     Determine if a task is publicly accessible.
 
@@ -1038,13 +1024,12 @@ def _is_task_public(db: Session, task: BackgroundTask) -> bool:
                 OR fcs_file.is_public is True
 
     Args:
-        db: Database session
         task: BackgroundTask to check
 
     Returns:
         True if task is public, False if private
     """
-    if task.task_type == "chunked_upload":
+    if task.task_type == TaskType.CHUNKED_UPLOAD:
         # Check extra_data first (handles in-progress uploads)
         if task.extra_data and "is_public" in task.extra_data:
             return task.extra_data["is_public"]
@@ -1057,7 +1042,7 @@ def _is_task_public(db: Session, task: BackgroundTask) -> bool:
         logger.warning(f"Chunked upload task {task.id} has no is_public info, defaulting to private")
         return False
 
-    elif task.task_type == "statistics":
+    elif task.task_type == TaskType.STATISTICS:
         # NULL fcs_file_id means sample file (public)
         if task.fcs_file_id is None:
             return True
@@ -1083,7 +1068,6 @@ def _is_task_public(db: Session, task: BackgroundTask) -> bool:
 )
 async def get_task_status_endpoint(
     task_id: int,
-    request: Request,
     pat_data: tuple[PersonalAccessToken, list[Scope]] = Depends(get_pat_with_scopes),
     db: Session = Depends(get_db),
 ):
@@ -1099,14 +1083,13 @@ async def get_task_status_endpoint(
 
     Args:
         task_id: Task ID (auto-increment integer)
-        request: FastAPI Request object (for dynamic endpoint/method detection)
         pat_data: Tuple of (PAT, scopes) from authentication
         db: Database session
 
     Returns:
         APIResponse with TaskResponseData containing:
         - task_id: Task ID
-        - status: Current status (pending, processing, finalizing, completed, failed)
+        - status: Current status (pending, processing, completed, failed, expired)
         - created_at: Creation timestamp
         - completed_at: Completion timestamp (if completed/failed)
         - result: Task result based on task_type:
@@ -1117,8 +1100,6 @@ async def get_task_status_endpoint(
         HTTPException 404: If task not found
         HTTPException 403: If user doesn't own the task or lacks required scope
     """
-    from app.models.background_task import BackgroundTask
-
     pat, scopes = pat_data
 
     # 1. Get task first (need task_type to determine required scope)
@@ -1137,9 +1118,9 @@ async def get_task_status_endpoint(
 
     # 2. Determine required scope based on task_type
     # Dynamic permission: upload tasks need fcs:write, statistics need fcs:analyze
-    if task.task_type == "chunked_upload":
+    if task.task_type == TaskType.CHUNKED_UPLOAD:
         required_scope = "fcs:write"
-    elif task.task_type == "statistics":
+    elif task.task_type == TaskType.STATISTICS:
         required_scope = "fcs:analyze"
     else:
         # Unknown task type - use highest level for safety
@@ -1149,15 +1130,12 @@ async def get_task_status_endpoint(
     # 3. Check if user has the required scope for this task type
     check_permission_and_get_context(
         db=db,
-        pat=pat,
         scopes=scopes,
         required_scope=required_scope,
-        endpoint=request.url.path,
-        method=request.method,
     )
 
     # 4. Access control: public tasks visible to all, private tasks only to owner
-    is_task_public = _is_task_public(db, task)
+    is_task_public = _is_task_public(task)
 
     if not is_task_public:
         # Private task - only owner can view
@@ -1184,18 +1162,18 @@ async def get_task_status_endpoint(
         "created_at": task.created_at.isoformat(),
     }
 
-    if task.task_type == "statistics":
+    if task.task_type == TaskType.STATISTICS:
         # Statistics task - return existing format
-        if task.status == "completed" and task.result:
+        if task.status == TaskStatus.COMPLETED and task.result:
             response_data["completed_at"] = task.completed_at.isoformat()
             response_data["result"] = task.result
-        elif task.status == "failed" and task.result:
+        elif task.status == TaskStatus.FAILED and task.result:
             response_data["completed_at"] = task.completed_at.isoformat()
             response_data["result"] = task.result
 
-    elif task.task_type == "chunked_upload":
+    elif task.task_type == TaskType.CHUNKED_UPLOAD:
         # Chunked upload task - return upload progress or result
-        if task.status == "processing":
+        if task.status == TaskStatus.PROCESSING:
             # Upload in progress - return progress from extra_data
             extra_data = task.extra_data or {}
             total_bytes = extra_data.get("file_size", 0)
@@ -1211,14 +1189,7 @@ async def get_task_status_endpoint(
                 "progress_percentage": progress_percentage,
             }
 
-        elif task.status == "finalizing":
-            # Parsing FCS file
-            response_data["result"] = {
-                "message": "Parsing FCS file...",
-                "filename": task.extra_data.get("filename", "") if task.extra_data else "",
-            }
-
-        elif task.status == "completed":
+        elif task.status == TaskStatus.COMPLETED:
             # Upload completed - return FCSFile info with download URL
             response_data["completed_at"] = task.completed_at.isoformat()
             if task.result:
@@ -1244,7 +1215,7 @@ async def get_task_status_endpoint(
                     ),
                 }
 
-        elif task.status == "failed":
+        elif task.status == TaskStatus.FAILED:
             # Upload failed
             response_data["completed_at"] = task.completed_at.isoformat() if task.completed_at else None
             response_data["result"] = task.result or {"error_message": "Upload failed"}

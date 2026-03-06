@@ -5,9 +5,10 @@ This module defines the BackgroundTask model for storing async task metadata,
 for US-MVP-003 statistics calculation feature.
 """
 from datetime import datetime
+from enum import Enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, String, Index, func, DateTime
+from sqlalchemy import Enum as SQLEnum, ForeignKey, String, Index, func, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
@@ -16,6 +17,22 @@ from app.database import Base
 if TYPE_CHECKING:
     from app.models.fcs_file import FCSFile
     from app.models.user import User
+
+
+class TaskType(str, Enum):
+    """Background task type enumeration."""
+
+    STATISTICS = "statistics"
+    CHUNKED_UPLOAD = "chunked_upload"
+
+
+class TaskStatus(str, Enum):
+    """Background task status enumeration."""
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    EXPIRED = "expired"
 
 
 class BackgroundTask(Base):
@@ -29,7 +46,7 @@ class BackgroundTask(Base):
         id: Primary key (used as task_id for API)
         task_type: Type of task (e.g., "statistics", "chunked_upload")
         fcs_file_id: Associated FCS file (nullable for sample files)
-        status: Task status (pending, processing, finalizing, completed, failed, expired)
+        status: Task status (pending, processing, completed, failed, expired)
         result: Task result data (JSON) - stores statistics or upload progress
         metadata: Additional task metadata (JSON) - stores upload session data
         created_at: Task creation timestamp
@@ -41,12 +58,17 @@ class BackgroundTask(Base):
     __tablename__ = "background_tasks"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    task_type: Mapped[str] = mapped_column(String(50))  # "statistics" or "chunked_upload"
+    task_type: Mapped[TaskType] = mapped_column(
+        SQLEnum(TaskType, values_callable=lambda obj: [e.value for e in obj])
+    )
     fcs_file_id: Mapped[int | None] = mapped_column(
         ForeignKey("fcs_files.id"), nullable=True
     )
-    status: Mapped[str] = mapped_column(String(20), default="pending")
-    # Status values: pending, processing, finalizing, completed, failed, expired
+    status: Mapped[TaskStatus] = mapped_column(
+        SQLEnum(TaskStatus, values_callable=lambda obj: [e.value for e in obj]),
+        default=TaskStatus.PENDING
+    )
+    # Status values defined in TaskStatus enum
     result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # For statistics: {total_events, statistics}
     # For chunked_upload: {filename, file_size, uploaded_bytes, uploaded_chunks, total_chunks, ...}

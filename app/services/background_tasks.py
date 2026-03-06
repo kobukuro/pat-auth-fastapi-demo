@@ -25,7 +25,7 @@ async def calculate_statistics_task(
     Background task for FCS statistics calculation.
 
     This function runs asynchronously after the API response is sent.
-    It calculates statistics for an FCS file and caches the results in the database.
+    It calculates statistics for an FCS file and stores the results in the database.
 
     Args:
         task_id: Background task ID (auto-increment integer)
@@ -48,7 +48,7 @@ async def calculate_statistics_task(
             logger.error(f"Background task {task_id} not found")
             return
 
-        task.status = "processing"
+        task.status = TaskStatus.PROCESSING
         db.commit()
 
         logger.info(
@@ -58,7 +58,7 @@ async def calculate_statistics_task(
         # Calculate statistics using NumPy
         result = calculate_fcs_statistics(file_path)
 
-        # Cache results in database (both sample and uploaded files)
+        # Store results in database (both sample and uploaded files)
         stats_record = FCSStatistics(
             file_id=file_id_for_storage,
             fcs_file_id=fcs_file_id,
@@ -68,7 +68,7 @@ async def calculate_statistics_task(
         db.add(stats_record)
 
         # Mark task as completed
-        task.status = "completed"
+        task.status = TaskStatus.COMPLETED
         task.result = {
             "total_events": result.total_events,
             "statistics": result.statistics,
@@ -84,7 +84,7 @@ async def calculate_statistics_task(
     except Exception as e:
         # Mark task as failed
         if "task" in locals():
-            task.status = "failed"
+            task.status = TaskStatus.FAILED
             task.result = {"error": str(e)}
             task.completed_at = datetime.now(timezone.utc)
             db.commit()
@@ -98,4 +98,4 @@ async def calculate_statistics_task(
 
 # Import BackgroundTask at module level to avoid circular imports
 # This is safe because the function is async and runs in a separate context
-from app.models.background_task import BackgroundTask
+from app.models.background_task import BackgroundTask, TaskStatus

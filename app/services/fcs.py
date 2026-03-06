@@ -6,10 +6,8 @@ using the flowio library. It extracts parameters metadata from FCS files.
 """
 import os
 from dataclasses import dataclass
-from pathlib import Path
 
 from flowio import FlowData
-
 
 # Configuration
 SAMPLE_FCS_PATH = "app/data/sample.fcs"
@@ -153,8 +151,6 @@ def get_fcs_parameters(file_path: str) -> FCSParametersData:
 def get_fcs_file_path(file_id: str | None, db) -> tuple[str, object | None]:
     """
     Query database for FCS file by file_id and return file path.
-
-    This function is reserved for future use when file upload is implemented.
 
     Args:
         file_id: The file ID to query.

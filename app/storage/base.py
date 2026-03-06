@@ -118,6 +118,7 @@ class StorageBackend(ABC):
         session_id: str,
         chunk_number: int,
         chunk_data: bytes,
+        chunk_size: int,
     ) -> int:
         """
         Save a single chunk to temporary file.
@@ -126,6 +127,7 @@ class StorageBackend(ABC):
             session_id: Upload session identifier (task_id)
             chunk_number: Chunk sequence number (0-based)
             chunk_data: Chunk bytes to write
+            chunk_size: Expected chunk size for offset calculation and validation
 
         Returns:
             Number of bytes written
@@ -133,6 +135,7 @@ class StorageBackend(ABC):
         Raises:
             StorageError: If chunk write fails
             FileNotFoundError: If session not initialized
+            ValueError: If chunk size exceeds expected chunk_size
         """
         pass
 

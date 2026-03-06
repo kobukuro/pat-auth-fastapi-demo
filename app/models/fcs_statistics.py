@@ -1,5 +1,5 @@
 """
-FCS statistics cache database model.
+FCS statistics storage database model.
 
 This module defines the FCSStatistics model for storing calculated statistics
 for FCS files, allowing fast retrieval without recalculating.
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 class FCSStatistics(Base):
     """
-    Cached FCS file statistics.
+    Stored FCS file statistics.
 
     Stores calculated statistics for FCS files to avoid recomputation.
     One record per file (identified by file_id).
@@ -29,7 +29,7 @@ class FCSStatistics(Base):
         file_id: Unique identifier ("sample" for sample file, or file_id for uploads)
         fcs_file_id: Foreign key to FCSFile (nullable for sample files)
         statistics: Statistics data as JSON
-        total_events: Total number of events (cached)
+        total_events: Total number of events (stored)
         calculated_at: When statistics were calculated
     """
 

@@ -9,7 +9,6 @@ from app.dependencies.auth import get_current_user
 from app.dependencies.token import get_validated_token
 from app.models.audit_log import PersonalAccessTokenAuditLog
 from app.models.pat import PersonalAccessToken
-from app.models.scope import Scope
 from app.models.user import User
 from app.schemas.audit_log import AuditLogEntry, TokenAuditLogsResponse
 from app.schemas.common import APIResponse

@@ -4,7 +4,7 @@ from time import time
 
 
 class RateLimiter:
-    """Thread-safe rate limiter using sliding window algorithm."""
+    """Thread-safe rate limiter using sliding window log algorithm."""
 
     def __init__(self, max_requests: int = 60, window_seconds: int = 60):
         self.max_requests = max_requests
